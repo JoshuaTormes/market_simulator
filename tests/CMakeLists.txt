@@ -22,7 +22,10 @@ function(add_sim_test name src)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
-add_sim_test(test_rng         unit/test_rng.cpp)
-add_sim_test(test_clock       unit/test_clock.cpp)
+add_sim_test(test_rng            unit/test_rng.cpp)
+add_sim_test(test_clock          unit/test_clock.cpp)
 add_sim_test(test_rolling_window unit/test_rolling_window.cpp)
-add_sim_test(test_eventbus    unit/test_eventbus.cpp)
+add_sim_test(test_eventbus       unit/test_eventbus.cpp)
+# Phase 1
+add_sim_test(test_orderbook      unit/test_orderbook.cpp)
+add_sim_test(test_matching       unit/test_matching.cpp)

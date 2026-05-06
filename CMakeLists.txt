@@ -56,10 +56,17 @@ target_compile_options(imgui_sfml PRIVATE -w)
 
 # ── sim_core: all simulation source (no UI, no main) ──────────────────────
 # This is what tests link against.
-file(GLOB_RECURSE CORE_SRC
-    src/core/*.cpp
+# Explicitly listed (no glob) so we control exactly which files enter the build.
+set(CORE_SRC
+    src/core/Clock.cpp
+    src/core/Config.cpp
+    src/core/Logger.cpp
+    src/core/RngService.cpp
+    # Phase 1
+    src/orderbook/OrderBookV2.cpp
+    src/matching/MatchingEngine.cpp
+    # Phase 2+: append here
 )
-# As more phases add source dirs, append them here (agents, ledger, etc.)
 
 add_library(sim_core STATIC ${CORE_SRC})
 target_include_directories(sim_core PUBLIC src)

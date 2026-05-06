@@ -1,10 +1,16 @@
 #pragma once
-#include <cstdint>
+#include "core/Types.h"
 
 struct Trade {
-    double price;
-    int quantity;
-    uint64_t buyOrderId;
-    uint64_t sellOrderId;
-    uint64_t timestamp;
+    Price   price       = 0;    // maker price (resting order)
+    Qty     qty         = 0;
+    OrderId maker_id    = 0;
+    OrderId taker_id    = 0;
+    Side    taker_side  = Side::Buy;
+    AgentId maker_agent = 0;
+    AgentId taker_agent = 0;
+    Tick    tick        = 0;
+    SeqNo   seq_no      = 0;
+    Price   fee_maker   = 0;    // negative = rebate
+    Price   fee_taker   = 0;
 };
