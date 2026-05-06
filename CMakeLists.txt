@@ -70,7 +70,13 @@ set(CORE_SRC
     src/clearing/Clearing.cpp
     # Phase 3
     src/marketdata/MarketDataPublisher.cpp
-    # Phase 4+: append here
+    # Phase 4
+    src/economics/GBMProcess.cpp
+    src/economics/JumpDiffusionProcess.cpp
+    src/economics/OUProcess.cpp
+    src/economics/RegimeSwitchingProcess.cpp
+    src/economics/PoissonNewsProcess.cpp
+    # Phase 5+: append here
 )
 
 add_library(sim_core STATIC ${CORE_SRC})
