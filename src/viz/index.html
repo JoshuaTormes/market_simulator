@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Simulador</title>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<style>
+body { background:#111; color:white; font-family: monospace; margin:0; padding:0; }
+#status { color:red; font-size:14px; padding:10px; }
+#charts { display:flex; flex-direction:column; height:95vh; }
+#chart { flex:2; min-height:300px; }
+#pnlChart { flex:1; min-height:250px; }
+</style>
+</head>
+<body>
+
+<!-- <div id="status">Desconectado. Tentando conectar...</div> -->
+<div id="charts">
+    <div id="chart"></div>
+    <div id="pnlChart"></div>
+</div>
+
+<script>
+let x=[], open=[], high=[], low=[], close=[], volume=[];
+let pnlAgents={}; // { agentId: { name, history: [{tick, pnl}] } }
+let socket=null;
+let reconnectInterval=500;
+
+let renderTimeout=null;
+const RENDER_INTERVAL_MS=50;
+const statusElement = document.getElementById('status');
+
+function renderChart() {
+    Plotly.react("chart", [
+        { type:"candlestick", x:x, open:open, high:high, low:low, close:close, name:"Preço", xaxis:"x", yaxis:"y" },
+        { type:"bar", x:x, y:volume, yaxis:"y2", xaxis:"x2", name:"Volume", opacity:0.5, marker:{color:'rgba(150,150,150,0.8)'} }
+    ], {
+        template:"plotly_dark",
+        xaxis:{ title:"Tick de Abertura", domain:[0,1], rangeslider:{visible:false} },
+        yaxis:{ title:"Preço", domain:[0.3,1] },
+        xaxis2:{ domain:[0,1], matches:'x', rangeslider:{visible:false} },
+        yaxis2:{ domain:[0,0.25], showgrid:false },
+        margin:{ t:30,b:30,r:30,l:30 },
+        height: window.innerHeight*0.6
+    });
+}
+
+function renderPnL() {
+    let agents = Object.values(pnlAgents);
+    if(agents.length===0) return;
+
+    // Pega último PnL de cada agente para ordenar
+    agents.sort((a,b)=>{
+        let aLast = a.history[a.history.length-1]?.pnl || 0;
+        let bLast = b.history[b.history.length-1]?.pnl || 0;
+        return bLast - aLast;
+    });
+
+    let top10 = agents.slice(0,10);
+    let bottom10 = agents.slice(-10).reverse();
+    let displayAgents = top10.concat(bottom10);
+
+    let traces = displayAgents.map(agent=>{
+        return {
+            x: agent.history.map(p=>p.tick),
+            y: agent.history.map(p=>p.pnl),
+            name: agent.name,
+            type: 'scatter',
+            mode: 'lines',
+            line: { color: agent.history[0].pnl>=0 ? 'lime' : 'red' }
+        };
+    });
+
+    Plotly.react("pnlChart", traces, {
+        template:"plotly_dark",
+        title:"Top 10 melhores e top 10 piores agentes",
+        margin:{ t:30,b:30,r:30,l:30 },
+        yaxis:{ title:"PnL", autorange:true }
+    });
+}
+
+function connectWebSocket(){
+    // statusElement.textContent = `Tentando conectar em ws://localhost:8765...`;
+    // statusElement.style.color='orange';
+
+    socket = new WebSocket("ws://localhost:8765");
+
+    socket.onopen = ()=>{
+        console.log("WebSocket conectado.");
+        // statusElement.textContent = "Conectado e recebendo dados.";
+        // statusElement.style.color='lightgreen';
+        reconnectInterval = 500;
+    };
+
+    socket.onmessage = (event)=>{
+        let d = JSON.parse(event.data);
+
+        if(d.type==="candle"){
+            x.push(d.t); open.push(d.o); high.push(d.h); low.push(d.l); close.push(d.c); volume.push(d.v);
+        } else if(d.type==="pnl"){
+            if(!pnlAgents[d.agentId]){
+                pnlAgents[d.agentId] = { name:d.agentType+"#"+d.agentId, history: [] };
+            }
+            pnlAgents[d.agentId].history.push({tick:d.tick, pnl:d.pnl});
+        }
+
+        if(renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(()=>{
+            renderChart();
+            renderPnL();
+            renderTimeout=null;
+        }, RENDER_INTERVAL_MS);
+    };
+
+    socket.onclose=(event)=>{
+        console.log(`WebSocket desconectado. Código:${event.code}`);
+        statusElement.textContent=`Desconectado. Tentando reconectar em ${reconnectInterval}ms...`;
+        statusElement.style.color='red';
+        setTimeout(connectWebSocket,reconnectInterval);
+        reconnectInterval = Math.min(reconnectInterval+500,5000);
+    };
+
+    socket.onerror=(error)=>{ console.error("Erro no WebSocket: ", error); };
+}
+
+connectWebSocket();
+</script>
+
+</body>
+</html>
