@@ -65,7 +65,10 @@ set(CORE_SRC
     # Phase 1
     src/orderbook/OrderBookV2.cpp
     src/matching/MatchingEngine.cpp
-    # Phase 2+: append here
+    # Phase 2
+    src/ledger/PositionLedger.cpp
+    src/clearing/Clearing.cpp
+    # Phase 3+: append here
 )
 
 add_library(sim_core STATIC ${CORE_SRC})
