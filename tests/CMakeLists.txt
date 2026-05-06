@@ -32,3 +32,6 @@ add_sim_test(test_matching       unit/test_matching.cpp)
 # Phase 2
 add_sim_test(test_ledger         unit/test_ledger.cpp)
 add_sim_test(test_clearing       unit/test_clearing.cpp)
+# Phase 3
+add_sim_test(test_market_data_publisher  unit/test_market_data_publisher.cpp)
+add_sim_test(test_agent_snapshot_noise   unit/test_agent_snapshot_noise.cpp)

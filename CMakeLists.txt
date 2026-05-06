@@ -68,7 +68,9 @@ set(CORE_SRC
     # Phase 2
     src/ledger/PositionLedger.cpp
     src/clearing/Clearing.cpp
-    # Phase 3+: append here
+    # Phase 3
+    src/marketdata/MarketDataPublisher.cpp
+    # Phase 4+: append here
 )
 
 add_library(sim_core STATIC ${CORE_SRC})
