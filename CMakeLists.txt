@@ -76,7 +76,21 @@ set(CORE_SRC
     src/economics/OUProcess.cpp
     src/economics/RegimeSwitchingProcess.cpp
     src/economics/PoissonNewsProcess.cpp
-    # Phase 5+: append here
+    # Phase 5
+    src/agents/AgentBase.cpp
+    src/agents/MarketMakerAS.cpp
+    src/agents/InformedTraderKyle.cpp
+    src/agents/NoiseTrader.cpp
+    src/agents/MomentumTrader.cpp
+    src/agents/MeanReverterOU.cpp
+    src/agents/ValueInvestor.cpp
+    src/agents/InstitutionalExecutor.cpp
+    src/agents/StopLossCluster.cpp
+    src/agents/NewsReactor.cpp
+    src/agents/AgentFactory.cpp
+    src/agents/AgentRunner.cpp
+    src/risk/RiskGate.cpp
+    # Phase 6+: append here
 )
 
 add_library(sim_core STATIC ${CORE_SRC})

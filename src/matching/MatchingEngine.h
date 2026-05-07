@@ -2,16 +2,11 @@
 #include "Events.h"
 #include "orderbook/OrderBookV2.h"
 #include "core/RngService.h"
+#include "core/LatencyProfile.h"
 #include <queue>
 #include <functional>
 #include <vector>
 #include <string>
-
-// Latency profile per agent — controls when a submitted event reaches the book.
-struct LatencyProfile {
-    Tick   base_latency_ticks = 0;
-    double jitter_lognormal_sigma = 0.0; // 0 = no jitter
-};
 
 // The matching engine:
 // 1. Accepts agent actions and schedules them as future MatchingEvents (with latency).

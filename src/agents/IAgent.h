@@ -1,45 +1,24 @@
 #pragma once
-#include <cstdint>
-#include <string>
-#include <unordered_map>
+#include "Action.h"
+#include "core/LatencyProfile.h"
+#include "marketdata/AgentSnapshot.h"
+#include "marketdata/InformationProfile.h"
+#include "risk/RiskLimits.h"
 #include <vector>
-#include "../orderbook/Order.h"
-#include "../orderbook/MarketSnapshot.h"
 
-class PositionLedger;
-
-struct PnLRecord {
-    uint64_t tick;
-    double pnl;
-};
-
+// Pure interface for all simulation agents.
+// Agents are stateful objects: they observe AgentSnapshot each tick and emit Actions.
 class IAgent {
 public:
-    explicit IAgent(uint64_t id) : id(id) {}
     virtual ~IAgent() = default;
 
-    virtual uint64_t getId() const { return id; }
+    // Called once per tick. Returns zero or more actions.
+    virtual std::vector<Action> on_market_data(const AgentSnapshot& snap) = 0;
 
-    virtual void bindLedger(const PositionLedger* ledger) = 0;
-
-    virtual std::vector<Order> analisar(
-        const MarketSnapshot& snapshot,
-        uint64_t tick,
-        const std::string& ticker
-    ) = 0;
-
-    virtual const char* type() const = 0;
-
-    virtual void recordPnL(
-        uint64_t tick,
-        const std::unordered_map<std::string,double>& marketPrices
-    ) {}
-
-    virtual const std::vector<PnLRecord>& getPnLHistory() const {
-        static std::vector<PnLRecord> empty;
-        return empty;
-    }
-
-protected:
-    uint64_t id;
+    // Static agent properties (set at construction, do not change mid-sim).
+    virtual LatencyProfile     latency() const = 0;
+    virtual RiskLimits         risk()    const = 0;
+    virtual InformationProfile info()    const = 0;
+    virtual const char*        type()    const = 0;
+    virtual AgentId            id()      const = 0;
 };
