@@ -90,7 +90,10 @@ set(CORE_SRC
     src/agents/AgentFactory.cpp
     src/agents/AgentRunner.cpp
     src/risk/RiskGate.cpp
-    # Phase 6+: append here
+    # Phase 6
+    src/marketdata/SnapshotBuffer.cpp
+    src/sim/SimulationLoop.cpp
+    # Phase 7+: append here
 )
 
 add_library(sim_core STATIC ${CORE_SRC})
@@ -102,8 +105,10 @@ target_compile_options(sim_core PRIVATE
 target_link_options(sim_core INTERFACE ${SIM_SANITIZER_FLAGS})
 
 # ── simulador executable ───────────────────────────────────────────────────
-# Temporarily uses src/main.cpp only; visual files added back in Phase 7.
-add_executable(simulador src/main.cpp)
+add_executable(simulador
+    src/main.cpp
+    src/visual/VisualApp.cpp
+)
 target_include_directories(simulador PRIVATE src)
 target_link_libraries(simulador PRIVATE
     sim_core

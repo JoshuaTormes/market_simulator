@@ -44,3 +44,6 @@ add_sim_test(test_kyle_informed          unit/test_kyle_informed.cpp)
 add_sim_test(test_noise_trader           unit/test_noise_trader.cpp)
 add_sim_test(test_risk_gate              unit/test_risk_gate.cpp)
 add_sim_test(test_agent_factory          unit/test_agent_factory.cpp)
+# Phase 6
+add_sim_test(test_snapshot_buffer        unit/test_snapshot_buffer.cpp)
+add_sim_test(test_sim_loop_smoke         integration/test_sim_loop_smoke.cpp)

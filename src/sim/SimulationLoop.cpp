@@ -1,0 +1,133 @@
+// Tick order (plan §Phase6):
+//  1. fundamental_process.step(dt)
+//  2. news_process.step(now) → EventBus
+//  3. agent_runner.run(prev_snap) → actions
+//  4. risk_gate.filter(actions) → filtered
+//  5. matching_engine.submit(filtered)
+//  6. matching_engine.process_until(now) → trades
+//  7. clearing.apply(trades)
+//  8. matching_engine.expire(now)
+//  9. market_data_publisher.publish(now) → new snapshot
+// 10. snapshot_buffer.commit(new snapshot)
+// 11. logger entry
+#include "SimulationLoop.h"
+#include <thread>
+#include <chrono>
+#include <variant>
+#include <cstdio>
+
+SimulationLoop::SimulationLoop(
+    Config cfg,
+    IFundamentalValueProcess& fundamental,
+    INewsEventProcess&        news,
+    AgentRunner&              runner,
+    RiskGate&                 risk_gate,
+    MatchingEngine&           engine,
+    Clearing&                 clearing,
+    PositionLedger&           ledger,
+    MarketDataPublisher&      publisher,
+    Logger&                   logger)
+    : cfg_(cfg)
+    , fundamental_(fundamental)
+    , news_(news)
+    , runner_(runner)
+    , risk_gate_(risk_gate)
+    , engine_(engine)
+    , clearing_(clearing)
+    , ledger_(ledger)
+    , publisher_(publisher)
+    , logger_(logger)
+{}
+
+void SimulationLoop::run(SnapshotBuffer& snap_buf) {
+    for (Tick t = 0; t < cfg_.max_ticks; ++t) {
+        if (stop_.load(std::memory_order_acquire)) break;
+
+        // Spin-wait while paused (UI can resume).
+        while (paused_.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            if (stop_.load(std::memory_order_acquire)) return;
+        }
+
+        current_tick_ = t;
+        tick_once(t, snap_buf);
+    }
+    logger_.log_info(current_tick_, "SimulationLoop finished");
+}
+
+void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
+    // 1. Advance fundamental value process.
+    fundamental_.step(now, cfg_.dt);
+
+    // 2. News events (published to EventBus inside the process).
+    news_.step(now);
+
+    // 3. Agents observe previous snapshot and produce actions.
+    auto agent_actions = runner_.run(prev_snap_, fundamental_.current_value());
+
+    // 4. Risk gate filters actions.
+    auto filtered = risk_gate_.filter(agent_actions, prev_snap_.mid_price);
+
+    // 5. Submit approved actions to matching engine.
+    submit_filtered(filtered, now);
+
+    // 6. Drain event queue and match orders.
+    engine_.process_until(now, [this](const Trade& trade) {
+        // 7. Apply each trade through clearing.
+        clearing_.apply(trade);
+        publisher_.on_trade(trade, current_tick_);
+    });
+
+    // 8. Expire TTL orders.
+    engine_.expire(now);
+
+    // 9. Publish market data snapshot.
+    MarketSnapshot snap = publisher_.publish(now);
+    prev_snap_ = snap;
+
+    // 10. Push to snapshot buffer for UI.
+    if (now % static_cast<Tick>(cfg_.publish_interval) == 0)
+        snap_buf.commit(snap);
+
+    // 11. Log per-tick summary (debug level — no-op in release).
+    if (now % 1000 == 0) {
+        char msg[128];
+        std::snprintf(msg, sizeof(msg),
+            "tick=%llu mid=%lld fundamental=%.2f",
+            (unsigned long long)now,
+            (long long)snap.mid_price,
+            fundamental_.current_value());
+        logger_.log_info(now, msg);
+    }
+}
+
+void SimulationLoop::submit_filtered(const std::vector<FilteredAction>& fas, Tick now) {
+    for (const auto& fa : fas) {
+        if (!fa.approved) continue;
+        IAgent*      a  = fa.agent;
+        LatencyProfile lp = a->latency();
+
+        std::visit([&](const auto& act) {
+            using T = std::decay_t<decltype(act)>;
+            if constexpr (std::is_same_v<T, SubmitOrder>) {
+                Order order;
+                order.id           = next_order_id_++;
+                order.agent_id     = a->id();
+                order.side         = act.side;
+                order.type         = act.type;
+                order.price        = act.price;
+                order.qty          = act.qty;
+                order.submit_tick  = now;
+                order.seq_no       = engine_.next_seq();
+                order.ticker       = act.ticker;
+                order.ttl_expiry   = act.ttl_expiry;
+                engine_.submit(order, now, lp);
+            } else if constexpr (std::is_same_v<T, CancelOrder>) {
+                engine_.cancel(act.order_id, a->id(), now, lp);
+            } else if constexpr (std::is_same_v<T, ModifyOrder>) {
+                engine_.modify(act.order_id, a->id(),
+                               act.new_price, act.new_qty, now, lp);
+            }
+        }, fa.action);
+    }
+}
