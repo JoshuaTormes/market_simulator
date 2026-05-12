@@ -40,7 +40,8 @@ public:
     double current_drift() const override { return cfg_.regimes[regime_].mu; }
     double current_vol()   const override { return cfg_.regimes[regime_].sigma; }
     const char* name()     const override { return "RegimeSwitching"; }
-    int    current_regime() const         { return regime_; }
+    int    current_regime() const              { return regime_; }
+    int    current_regime_hint() const override { return regime_; }
 
 private:
     Config cfg_;

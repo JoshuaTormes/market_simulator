@@ -27,7 +27,7 @@ SimulationLoop::SimulationLoop(
     PositionLedger&           ledger,
     MarketDataPublisher&      publisher,
     Logger&                   logger)
-    : cfg_(cfg)
+    : cfg_(std::move(cfg))
     , fundamental_(fundamental)
     , news_(news)
     , runner_(runner)
@@ -43,16 +43,48 @@ void SimulationLoop::run(SnapshotBuffer& snap_buf) {
     for (Tick t = 0; t < cfg_.max_ticks; ++t) {
         if (stop_.load(std::memory_order_acquire)) break;
 
-        // Spin-wait while paused (UI can resume).
+        // Pause loop: spin-wait, but honour step_count_ for single-step mode.
         while (paused_.load(std::memory_order_acquire)) {
+            if (step_count_.load(std::memory_order_relaxed) > 0) {
+                step_count_.fetch_sub(1, std::memory_order_relaxed);
+                break; // execute one tick then re-enter the pause loop
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             if (stop_.load(std::memory_order_acquire)) return;
         }
 
         current_tick_ = t;
         tick_once(t, snap_buf);
+
+        // Optional speed limiter.
+        uint64_t delay = tick_delay_us_.load(std::memory_order_relaxed);
+        if (delay > 0)
+            std::this_thread::sleep_for(std::chrono::microseconds(delay));
     }
     logger_.log_info(current_tick_, "SimulationLoop finished");
+}
+
+void SimulationLoop::flush_pending_news() {
+    if (!event_bus_) return;
+    std::lock_guard<std::mutex> lk(pending_news_mu_);
+    for (const auto& ev : pending_news_)
+        event_bus_->publish(ev);
+    pending_news_.clear();
+}
+
+void SimulationLoop::update_agent_state_buf(const MarketSnapshot& snap) {
+    if (!agent_state_buf_ || agent_ids_.empty()) return;
+    std::vector<AgentState> states;
+    states.reserve(agent_ids_.size());
+    for (AgentId id : agent_ids_) {
+        AgentState s;
+        s.id             = id;
+        s.net_qty        = ledger_.net_qty(id, ticker_);
+        s.realized_pnl   = ledger_.realized_pnl(id, ticker_);
+        s.unrealized_pnl = ledger_.unrealized_pnl(id, ticker_, snap.mid_price);
+        states.push_back(s);
+    }
+    agent_state_buf_->update(std::move(states));
 }
 
 void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
@@ -61,6 +93,9 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
 
     // 2. News events (published to EventBus inside the process).
     news_.step(now);
+
+    // 2b. Publish any UI-injected news (thread-safe queue).
+    flush_pending_news();
 
     // 3. Agents observe previous snapshot and produce actions.
     auto agent_actions = runner_.run(prev_snap_, fundamental_.current_value());
@@ -76,6 +111,12 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
         // 7. Apply each trade through clearing.
         clearing_.apply(trade);
         publisher_.on_trade(trade, current_tick_);
+        // Feed trade tape for UI.
+        if (trade_tape_) {
+            TapeEntry e{trade.tick, trade.price, trade.qty,
+                        trade.taker_side, trade.taker_agent, trade.maker_agent};
+            trade_tape_->push(e);
+        }
     });
 
     // 8. Expire TTL orders.
@@ -83,11 +124,15 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
 
     // 9. Publish market data snapshot.
     MarketSnapshot snap = publisher_.publish(now);
+    snap.regime = fundamental_.current_regime_hint();
     prev_snap_ = snap;
 
     // 10. Push to snapshot buffer for UI.
     if (now % static_cast<Tick>(cfg_.publish_interval) == 0)
         snap_buf.commit(snap);
+
+    // 10b. Update per-agent state buffer for UI.
+    update_agent_state_buf(snap);
 
     // 11. Log per-tick summary (debug level — no-op in release).
     if (now % 1000 == 0) {

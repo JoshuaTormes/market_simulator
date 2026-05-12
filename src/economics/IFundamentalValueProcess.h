@@ -20,4 +20,7 @@ public:
     virtual double current_vol() const = 0;
 
     virtual const char* name() const = 0;
+
+    // Regime index for UI display (-1 if process has no regime concept).
+    virtual int current_regime_hint() const { return -1; }
 };

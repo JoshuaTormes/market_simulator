@@ -43,5 +43,8 @@ struct MarketSnapshot {
     // ── Time ──────────────────────────────────────────────────────────────
     Tick time_since_last_trade = 0;
 
+    // Regime from fundamental process (-1 = not applicable, set by SimulationLoop).
+    int regime = -1;
+
     bool is_valid() const { return spread >= 0; }
 };

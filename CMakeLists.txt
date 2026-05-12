@@ -108,6 +108,14 @@ target_link_options(sim_core INTERFACE ${SIM_SANITIZER_FLAGS})
 add_executable(simulador
     src/main.cpp
     src/visual/VisualApp.cpp
+    src/visual/Controls.cpp
+    src/visual/panels/OrderBookHeatmap.cpp
+    src/visual/panels/CandleVolumeVwap.cpp
+    src/visual/panels/TradeTape.cpp
+    src/visual/panels/AgentInspector.cpp
+    src/visual/panels/MicrostructureDashboard.cpp
+    src/visual/panels/StylizedFactsPanel.cpp
+    src/visual/panels/RegimeIndicator.cpp
 )
 target_include_directories(simulador PRIVATE src)
 target_link_libraries(simulador PRIVATE

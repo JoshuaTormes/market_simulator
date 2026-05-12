@@ -1,16 +1,18 @@
-// Full DI assembly: wires all Phase 0-6 components and runs sim + UI concurrently.
+// Full DI assembly: wires all Phase 0-7 components and runs sim + UI concurrently.
 #include "core/Config.h"
 #include "core/RngService.h"
 #include "core/Logger.h"
+#include "core/EventBus.h"
 #include "orderbook/OrderBookV2.h"
 #include "matching/MatchingEngine.h"
 #include "ledger/PositionLedger.h"
 #include "clearing/Clearing.h"
 #include "marketdata/MarketDataPublisher.h"
 #include "marketdata/SnapshotBuffer.h"
+#include "marketdata/TradeTapeBuffer.h"
+#include "marketdata/AgentStateBuffer.h"
 #include "economics/RegimeSwitchingProcess.h"
 #include "economics/PoissonNewsProcess.h"
-#include "core/EventBus.h"
 #include "agents/AgentFactory.h"
 #include "agents/AgentRunner.h"
 #include "risk/RiskGate.h"
@@ -78,16 +80,29 @@ int main(int argc, char** argv) {
     SimulationLoop::Config sim_cfg;
     sim_cfg.max_ticks        = cfg.max_ticks;
     sim_cfg.publish_interval = cfg.publish_interval_ticks;
+    sim_cfg.ticker           = cfg.ticker;
 
-    SnapshotBuffer snap_buf;
+    SnapshotBuffer   snap_buf;
+    TradeTapeBuffer  tape_buf;
+    AgentStateBuffer agent_buf;
 
     SimulationLoop sim_loop(sim_cfg, fundamental, news, runner, risk_gate,
                             matching, clearing, ledger, publisher, logger);
 
+    // Wire optional UI buffers.
+    sim_loop.set_event_bus(&bus);
+    sim_loop.set_trade_tape(&tape_buf);
+    {
+        std::vector<AgentId> ids;
+        ids.reserve(owned_agents.size());
+        for (auto& a : owned_agents) ids.push_back(a->id());
+        sim_loop.set_agent_state_buf(&agent_buf, std::move(ids), cfg.ticker);
+    }
+
     // ── Run sim thread + UI on main thread ───────────────────────────────────
     std::thread sim_thread([&] { sim_loop.run(snap_buf); });
 
-    VisualApp app(snap_buf, sim_loop);
+    VisualApp app(snap_buf, tape_buf, agent_buf, sim_loop, bus, fundamental);
     app.run();
 
     sim_loop.request_stop();
