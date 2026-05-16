@@ -47,3 +47,6 @@ add_sim_test(test_agent_factory          unit/test_agent_factory.cpp)
 # Phase 6
 add_sim_test(test_snapshot_buffer        unit/test_snapshot_buffer.cpp)
 add_sim_test(test_sim_loop_smoke         integration/test_sim_loop_smoke.cpp)
+# Phase 8
+add_sim_test(test_binary_log_roundtrip   unit/test_binary_log_roundtrip.cpp)
+add_sim_test(test_replay_determinism     integration/test_replay_determinism.cpp)

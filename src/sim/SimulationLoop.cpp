@@ -92,10 +92,16 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
     fundamental_.step(now, cfg_.dt);
 
     // 2. News events (published to EventBus inside the process).
-    news_.step(now);
+    auto news_events = news_.step(now);
 
     // 2b. Publish any UI-injected news (thread-safe queue).
     flush_pending_news();
+
+    // Log news events.
+    if (log_writer_) {
+        for (const auto& nev : news_events)
+            log_writer_->write_news(nev);
+    }
 
     // 3. Agents observe previous snapshot and produce actions.
     auto agent_actions = runner_.run(prev_snap_, fundamental_.current_value());
@@ -117,6 +123,8 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
                         trade.taker_side, trade.taker_agent, trade.maker_agent};
             trade_tape_->push(e);
         }
+        // Persist to binary log.
+        if (log_writer_) log_writer_->write_trade(trade);
     });
 
     // 8. Expire TTL orders.
@@ -127,9 +135,15 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
     snap.regime = fundamental_.current_regime_hint();
     prev_snap_ = snap;
 
-    // 10. Push to snapshot buffer for UI.
-    if (now % static_cast<Tick>(cfg_.publish_interval) == 0)
+    // 10. Push to snapshot buffer for UI; persist to binary log.
+    if (now % static_cast<Tick>(cfg_.publish_interval) == 0) {
         snap_buf.commit(snap);
+        if (log_writer_) log_writer_->write_snapshot(snap);
+    }
+
+    // Detect and log regime changes.
+    if (log_writer_ && now > 0 && snap.regime != prev_snap_.regime)
+        log_writer_->write_regime_change(now, prev_snap_.regime, snap.regime);
 
     // 10b. Update per-agent state buffer for UI.
     update_agent_state_buf(snap);

@@ -1,4 +1,4 @@
-// Full DI assembly: wires all Phase 0-7 components and runs sim + UI concurrently.
+// Full DI assembly: wires all Phase 0-8 components and runs sim + UI concurrently.
 #include "core/Config.h"
 #include "core/RngService.h"
 #include "core/Logger.h"
@@ -17,11 +17,12 @@
 #include "agents/AgentRunner.h"
 #include "risk/RiskGate.h"
 #include "sim/SimulationLoop.h"
+#include "persistence/BinaryLogWriter.h"
 #include "visual/VisualApp.h"
 #include <cstdio>
-#include <thread>
-#include <string>
 #include <memory>
+#include <string>
+#include <thread>
 #include <vector>
 
 int main(int argc, char** argv) {
@@ -29,9 +30,10 @@ int main(int argc, char** argv) {
 
     for (int i = 1; i < argc - 1; ++i) {
         std::string key = argv[i];
-        if (key == "--seed")     cfg.seed      = static_cast<uint64_t>(std::stoul(argv[i+1]));
-        if (key == "--duration") cfg.max_ticks = static_cast<uint64_t>(std::stoul(argv[i+1]));
-        if (key == "--ticker")   cfg.ticker    = argv[i+1];
+        if (key == "--seed")     cfg.seed             = static_cast<uint64_t>(std::stoul(argv[i+1]));
+        if (key == "--duration") cfg.max_ticks        = static_cast<uint64_t>(std::stoul(argv[i+1]));
+        if (key == "--ticker")   cfg.ticker           = argv[i+1];
+        if (key == "--output")   cfg.log_output_path  = argv[i+1];
     }
 
     // ── Infra ────────────────────────────────────────────────────────────────
@@ -86,12 +88,21 @@ int main(int argc, char** argv) {
     TradeTapeBuffer  tape_buf;
     AgentStateBuffer agent_buf;
 
+    // Binary log writer (optional — only created if --output is set).
+    std::unique_ptr<BinaryLogWriter> log_writer;
+    if (!cfg.log_output_path.empty() && cfg.log_output_path != "sim.bin.log") {
+        log_writer = std::make_unique<BinaryLogWriter>(
+            cfg.log_output_path, cfg.seed, cfg.max_ticks,
+            static_cast<uint64_t>(cfg.publish_interval_ticks), cfg.ticker);
+    }
+
     SimulationLoop sim_loop(sim_cfg, fundamental, news, runner, risk_gate,
                             matching, clearing, ledger, publisher, logger);
 
-    // Wire optional UI buffers.
+    // Wire optional buffers.
     sim_loop.set_event_bus(&bus);
     sim_loop.set_trade_tape(&tape_buf);
+    if (log_writer) sim_loop.set_log_writer(log_writer.get());
     {
         std::vector<AgentId> ids;
         ids.reserve(owned_agents.size());
@@ -107,6 +118,13 @@ int main(int argc, char** argv) {
 
     sim_loop.request_stop();
     sim_thread.join();
+
+    if (log_writer) {
+        log_writer->flush(true); // fsync on clean exit
+        std::fprintf(stderr, "[INFO] Binary log: %s  (%.1f KB)\n",
+                     cfg.log_output_path.c_str(),
+                     log_writer->bytes_written() / 1024.0);
+    }
 
     logger.flush();
     return 0;

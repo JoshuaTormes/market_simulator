@@ -93,7 +93,11 @@ set(CORE_SRC
     # Phase 6
     src/marketdata/SnapshotBuffer.cpp
     src/sim/SimulationLoop.cpp
-    # Phase 7+: append here
+    # Phase 8
+    src/persistence/BinaryLogWriter.cpp
+    src/persistence/BinaryLogReader.cpp
+    src/persistence/CsvExporter.cpp
+    src/persistence/Replay.cpp
 )
 
 add_library(sim_core STATIC ${CORE_SRC})
@@ -136,6 +140,12 @@ target_link_options(simulador PRIVATE ${SIM_SANITIZER_FLAGS})
 if(APPLE)
     target_link_libraries(simulador PRIVATE "-framework OpenGL" "-framework Cocoa")
 endif()
+
+# ── analysis_csv_export: offline CSV export tool (no UI) ──────────────────
+add_executable(analysis_csv_export src/tools/analysis_csv_export.cpp)
+target_include_directories(analysis_csv_export PRIVATE src)
+target_link_libraries(analysis_csv_export PRIVATE sim_core)
+target_compile_options(analysis_csv_export PRIVATE ${SIM_WARN_FLAGS})
 
 # ── Tests ─────────────────────────────────────────────────────────────────
 enable_testing()

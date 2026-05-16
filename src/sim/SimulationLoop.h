@@ -16,6 +16,7 @@
 #include "marketdata/SnapshotBuffer.h"
 #include "marketdata/TradeTapeBuffer.h"
 #include "marketdata/AgentStateBuffer.h"
+#include "persistence/BinaryLogWriter.h"
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -67,6 +68,7 @@ public:
         agent_ids_       = std::move(ids);
         ticker_          = std::move(ticker);
     }
+    void set_log_writer(BinaryLogWriter* writer) { log_writer_ = writer; }
 
     // Thread-safe: queue a news event to be published on the next sim tick.
     void inject_news(const NewsEvent& ev) {
@@ -89,9 +91,10 @@ private:
     Logger&                    logger_;
 
     // Optional UI-facing buffers (nullptr = disabled)
-    EventBus*        event_bus_{nullptr};
-    TradeTapeBuffer* trade_tape_{nullptr};
-    AgentStateBuffer*agent_state_buf_{nullptr};
+    EventBus*         event_bus_{nullptr};
+    TradeTapeBuffer*  trade_tape_{nullptr};
+    AgentStateBuffer* agent_state_buf_{nullptr};
+    BinaryLogWriter*  log_writer_{nullptr};
     std::vector<AgentId> agent_ids_;
     std::string      ticker_;
 
