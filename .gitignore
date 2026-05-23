@@ -2,3 +2,6 @@
 build
 .claude/
 specs/
+logs/
+imgui.ini
+*.DS_Store
