@@ -43,6 +43,7 @@ private:
     Price prev_mid_         = 0;  // mid from previous tick (for return calculation)
     Price fundamental_price_ = 0; // set each tick by SimulationLoop for empty-book fallback
     double momentum_prev_   = 0.0;
+    double tick_ofi_        = 0.0; // per-tick signed volume accumulator, reset each publish()
 
     // Per-window rolling stats
     struct WindowState {

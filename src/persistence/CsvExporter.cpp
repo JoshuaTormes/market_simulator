@@ -26,7 +26,7 @@ CsvExporter::Stats CsvExporter::export_all(const std::string& bin_path,
         "maker_id,taker_id,fee_maker,fee_taker");
     FILE* fs = open_csv(out_dir, "snapshots.csv",
         "tick,mid_price,spread,last_trade_price,realized_vol_s,"
-        "realized_vol_m,realized_vol_l,vwap_s,ofi,trade_imbalance,"
+        "realized_vol_m,realized_vol_l,vwap_s,ofi_tick,trade_imbalance,"
         "momentum,book_imbalance_l1,regime");
     FILE* fn = open_csv(out_dir, "news.csv",
         "announce_tick,ticker,impact_log_return,duration_ticks,dispersion_sigma");
@@ -62,7 +62,7 @@ CsvExporter::Stats CsvExporter::export_all(const std::string& bin_path,
                     (long long)r.spread,
                     (long long)r.last_trade_price,
                     r.realized_vol_s, r.realized_vol_m, r.realized_vol_l,
-                    r.vwap_s, r.order_flow_imbalance, r.trade_imbalance,
+                    r.vwap_s, r.ofi_tick, r.trade_imbalance,
                     r.momentum, r.book_imbalance_l1, (int)r.regime);
                 ++stats.snapshots;
             }

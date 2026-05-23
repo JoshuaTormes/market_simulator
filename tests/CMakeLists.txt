@@ -35,6 +35,7 @@ add_sim_test(test_clearing       unit/test_clearing.cpp)
 # Phase 3
 add_sim_test(test_market_data_publisher  unit/test_market_data_publisher.cpp)
 add_sim_test(test_agent_snapshot_noise   unit/test_agent_snapshot_noise.cpp)
+add_sim_test(test_ofi_tick               unit/test_ofi_tick.cpp)
 # Phase 4
 add_sim_test(test_fundamental_processes  unit/test_fundamental_processes.cpp)
 add_sim_test(test_news_process           unit/test_news_process.cpp)

@@ -24,6 +24,9 @@ void MarketDataPublisher::on_trade(const Trade& trade, Tick now) {
     double p = static_cast<double>(trade.price);
     double q = static_cast<double>(trade.qty);
 
+    // Accumulate per-tick OFI (reset to 0 each call to publish())
+    tick_ofi_ += signed_vol;
+
     for (int i = 0; i < MarketSnapshot::kWindows; ++i) {
         windows_[i]->pv.push(p * q);
         windows_[i]->vol.push(q);
@@ -119,10 +122,13 @@ MarketSnapshot MarketDataPublisher::publish(Tick now) {
         double mean_vol = ws.vol.mean();
         snap.vwap[i] = (mean_vol > 0) ? mean_pv / mean_vol
                                        : static_cast<double>(snap.last_trade_price);
-
-        // OFI: mean signed volume
-        snap.order_flow_imbalance = ws.ofi.mean(); // use short window for OFI
     }
+    // Windowed OFI: use short window only (window[0])
+    snap.order_flow_imbalance = windows_[0]->ofi.mean();
+
+    // Per-tick OFI: signed volume accumulated since last publish(), then reset.
+    snap.ofi_tick = tick_ofi_;
+    tick_ofi_ = 0.0;
 
     // Trade imbalance (short window): buy_vol / (buy_vol + sell_vol)
     {

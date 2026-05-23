@@ -24,7 +24,7 @@ enum class EventTag : uint8_t {
 };
 
 static constexpr uint32_t kFileMagic     = 0x534D4C42u;  // 'SMLB'
-static constexpr uint16_t kSchemaVersion = 1;
+static constexpr uint16_t kSchemaVersion = 2;            // v2: ofi_tick replaces order_flow_imbalance field
 
 // ── Packed payload records ────────────────────────────────────────────────────
 #pragma pack(push, 1)
@@ -66,7 +66,7 @@ struct MarketSnapshotRecord {
     double  realized_vol_m;   // medium window
     double  realized_vol_l;   // long window
     double  vwap_s;
-    double  order_flow_imbalance;
+    double  ofi_tick;         // per-tick OFI: Σbuy_vol − Σsell_vol (v2: was windowed OFI)
     double  trade_imbalance;
     double  momentum;
     double  book_imbalance_l1;

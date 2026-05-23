@@ -137,6 +137,11 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
     // 9. Publish market data snapshot.
     MarketSnapshot snap = publisher_.publish(now);
     snap.regime = fundamental_.current_regime_hint();
+
+    // Detect and log regime changes before updating prev_snap_.
+    if (log_writer_ && now > 0 && snap.regime != prev_snap_.regime)
+        log_writer_->write_regime_change(now, prev_snap_.regime, snap.regime);
+
     prev_snap_ = snap;
 
     // 10. Push to snapshot buffer for UI; persist to binary log.
@@ -144,10 +149,6 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
         snap_buf.commit(snap);
         if (log_writer_) log_writer_->write_snapshot(snap);
     }
-
-    // Detect and log regime changes.
-    if (log_writer_ && now > 0 && snap.regime != prev_snap_.regime)
-        log_writer_->write_regime_change(now, prev_snap_.regime, snap.regime);
 
     // 10b. Update per-agent state buffer for UI.
     update_agent_state_buf(snap);

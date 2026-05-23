@@ -33,7 +33,8 @@ struct MarketSnapshot {
 
     // ── Flow / microstructure ─────────────────────────────────────────────
     double trade_imbalance      = 0.5; // buy-vol / total-vol over short window (0.0–1.0)
-    double order_flow_imbalance = 0.0; // signed volume (Cont-Kukanov proxy)
+    double order_flow_imbalance = 0.0; // windowed signed volume: windows_[0] mean (short window)
+    double ofi_tick             = 0.0; // per-tick OFI: Σbuy_vol − Σsell_vol in this tick only
 
     // ── Momentum ──────────────────────────────────────────────────────────
     std::vector<double> recent_returns;   // last N log-returns (newest last)

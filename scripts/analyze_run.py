@@ -157,7 +157,8 @@ def run(csv_dir):
     acf_r    = acf(returns_all, max_lag)
     acf_absr = acf([abs(r) for r in returns_all], max_lag)
 
-    ofi_series = [float(s["ofi"]) for s in snaps if float(s["ofi"]) != 0]
+    ofi_col = "ofi_tick" if "ofi_tick" in snaps[0] else "ofi"
+    ofi_series = [float(s[ofi_col]) for s in snaps if float(s[ofi_col]) != 0]
     acf_ofi  = acf(ofi_series, max_lag) if len(ofi_series) > 2 else []
 
     print(f"  ACF(r,  lag 1..5): {[f'{v:.4f}' for v in acf_r[:5]]}")

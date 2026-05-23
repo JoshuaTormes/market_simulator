@@ -68,7 +68,7 @@ void BinaryLogWriter::write_snapshot(const MarketSnapshot& s) {
     r.realized_vol_m        = s.realized_vol[1];
     r.realized_vol_l        = s.realized_vol[2];
     r.vwap_s                = s.vwap[0];
-    r.order_flow_imbalance  = s.order_flow_imbalance;
+    r.ofi_tick              = s.ofi_tick;
     r.trade_imbalance       = s.trade_imbalance;
     r.momentum              = s.momentum;
     r.book_imbalance_l1     = s.book_imbalance[0];

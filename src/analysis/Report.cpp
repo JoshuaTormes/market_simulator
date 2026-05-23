@@ -76,7 +76,7 @@ static LogData extract(const std::string& bin_path) {
                 d.mid_prices.push_back(static_cast<double>(sr->mid_price));
                 d.price_ticks.push_back(sr->tick);
                 d.spreads.push_back(static_cast<double>(sr->spread));
-                d.ofi.push_back(sr->order_flow_imbalance);
+                d.ofi.push_back(sr->ofi_tick);
             }
             ++d.n_snapshots;
         } else if (std::get_if<TradeRecord>(&*rec)) {
