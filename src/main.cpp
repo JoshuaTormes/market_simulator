@@ -3,7 +3,6 @@
 #include "core/RngService.h"
 #include "core/Logger.h"
 #include "core/EventBus.h"
-#include "orderbook/OrderBookV2.h"
 #include "matching/MatchingEngine.h"
 #include "ledger/PositionLedger.h"
 #include "clearing/Clearing.h"
@@ -50,11 +49,11 @@ int main(int argc, char** argv) {
     EventBus bus;
 
     // ── Market mechanics ─────────────────────────────────────────────────────
-    OrderBookV2       book;
     MatchingEngine    matching(cfg.ticker, FeeModel{}, STPMode::CancelBoth, &rng);
     PositionLedger    ledger;
     Clearing          clearing(ledger, cfg.ticker);
-    MarketDataPublisher publisher(book);
+    // Publisher reads from the matching engine's internal book (the canonical book state).
+    MarketDataPublisher publisher(matching.book());
 
     // ── Fundamental value + news ─────────────────────────────────────────────
     RegimeSwitchingProcess::Config rs_cfg;
@@ -83,6 +82,7 @@ int main(int argc, char** argv) {
     sim_cfg.max_ticks        = cfg.max_ticks;
     sim_cfg.publish_interval = cfg.publish_interval_ticks;
     sim_cfg.ticker           = cfg.ticker;
+    sim_cfg.tick_size        = cfg.tick_size;
 
     SnapshotBuffer   snap_buf;
     TradeTapeBuffer  tape_buf;

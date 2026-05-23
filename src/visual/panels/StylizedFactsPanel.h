@@ -1,5 +1,9 @@
 #pragma once
-// Stylized facts: return histogram, ACF of returns and |returns|, Q-Q plot vs normal.
+// Stylized facts: return histogram, ACF of returns and |returns|, Q-Q plot,
+// Hill tail-index display, and live pass/fail badges for the 8 stylized facts.
+// ACF computation delegates to AcfComputer (shared with the offline analysis CLI).
+#include "analysis/AcfComputer.h"
+#include "analysis/HillEstimator.h"
 #include "marketdata/MarketSnapshot.h"
 #include <vector>
 
@@ -11,17 +15,20 @@ public:
     void draw(const MarketSnapshot& snap);
 
 private:
-    std::vector<double> returns_;    // log-returns history
+    std::vector<double> returns_;
     double prev_log_price_ = 0.0;
 
-    // Computed series (rebuilt periodically)
-    std::vector<double> acf_ret_;    // ACF of returns
-    std::vector<double> acf_abs_;    // ACF of |returns|
+    // Computed series (rebuilt periodically via AcfComputer).
+    AcfResult acf_ret_;
+    AcfResult acf_abs_;
+    HillResult hill_;
+
     std::vector<double> lags_;
-    std::vector<double> qq_x_;       // theoretical normal quantiles
-    std::vector<double> qq_y_;       // empirical return quantiles
+    std::vector<double> qq_x_;
+    std::vector<double> qq_y_;
 
     void ingest_return(const MarketSnapshot& snap);
     void recompute_stats();
+
     static double inv_normal_cdf(double p);
 };

@@ -31,16 +31,18 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
     std::mt19937_64 eng = rng_.for_consumer("AgentFactory");
     std::vector<std::unique_ptr<IAgent>> agents;
 
-    // Market makers
+    // Market makers — see fundamental so quotes center on fundamental value
     for (int i = 0; i < cfg_.market_makers.count; ++i) {
         MarketMakerAS::Params p;
         p.gamma = sample(cfg_.market_makers.gamma_range, eng);
         p.kappa = sample(cfg_.market_makers.k_range, eng);
         p.sigma = sample(cfg_.market_makers.sigma_range, eng);
         p.T     = cfg_.market_makers.T_horizon;
+        InformationProfile ip;
+        ip.sees_fundamental = true;
         agents.emplace_back(std::make_unique<MarketMakerAS>(
             alloc_id(), ticker_, rng_.for_consumer("MM_" + std::to_string(i)),
-            p));
+            p, RiskLimits{}, LatencyProfile{}, ip));
     }
 
     // Noise traders

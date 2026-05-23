@@ -98,6 +98,11 @@ set(CORE_SRC
     src/persistence/BinaryLogReader.cpp
     src/persistence/CsvExporter.cpp
     src/persistence/Replay.cpp
+    # Phase 9
+    src/analysis/AcfComputer.cpp
+    src/analysis/HillEstimator.cpp
+    src/analysis/FlashCrashDetector.cpp
+    src/analysis/Report.cpp
 )
 
 add_library(sim_core STATIC ${CORE_SRC})
@@ -146,6 +151,15 @@ add_executable(analysis_csv_export src/tools/analysis_csv_export.cpp)
 target_include_directories(analysis_csv_export PRIVATE src)
 target_link_libraries(analysis_csv_export PRIVATE sim_core)
 target_compile_options(analysis_csv_export PRIVATE ${SIM_WARN_FLAGS})
+
+# ── sim_headless: full simulation without UI (for calibration / CI) ────────
+add_executable(sim_headless src/tools/sim_headless.cpp)
+target_include_directories(sim_headless PRIVATE src)
+target_link_libraries(sim_headless PRIVATE sim_core)
+target_compile_options(sim_headless PRIVATE ${SIM_WARN_FLAGS})
+
+# ── analysis tools (no UI) ─────────────────────────────────────────────────
+add_subdirectory(analysis)
 
 # ── Tests ─────────────────────────────────────────────────────────────────
 enable_testing()

@@ -8,7 +8,6 @@
 #include "core/RngService.h"
 #include "core/EventBus.h"
 #include "core/Logger.h"
-#include "orderbook/OrderBookV2.h"
 #include "matching/MatchingEngine.h"
 #include "ledger/PositionLedger.h"
 #include "clearing/Clearing.h"
@@ -36,11 +35,10 @@ static Price run_sim(uint64_t seed, const std::string& log_path) {
     RngService rng(seed);
     EventBus   bus;
 
-    OrderBookV2         book;
     MatchingEngine      matching(TICKER, FeeModel{}, STPMode::CancelBoth, &rng);
     PositionLedger      ledger;
     Clearing            clearing(ledger, TICKER);
-    MarketDataPublisher publisher(book);
+    MarketDataPublisher publisher(matching.book());
 
     // Seed book with resting bid/ask so agents have a reference price.
     {

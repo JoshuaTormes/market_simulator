@@ -30,6 +30,9 @@ public:
     // Reads current book state and computes all snapshot fields.
     MarketSnapshot publish(Tick now);
 
+    // Set by SimulationLoop each tick so empty-book fallback tracks fundamental (not last trade).
+    void set_fundamental_price(Price p) { fundamental_price_ = p; }
+
 private:
     const OrderBookV2& book_;
     Config cfg_;
@@ -38,6 +41,7 @@ private:
     Price last_trade_price_ = 0;
     Tick  last_trade_tick_  = 0;
     Price prev_mid_         = 0;  // mid from previous tick (for return calculation)
+    Price fundamental_price_ = 0; // set each tick by SimulationLoop for empty-book fallback
     double momentum_prev_   = 0.0;
 
     // Per-window rolling stats

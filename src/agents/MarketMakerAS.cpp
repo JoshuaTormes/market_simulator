@@ -21,7 +21,9 @@ std::vector<Action> MarketMakerAS::on_market_data(const AgentSnapshot& snap) {
     double elapsed = static_cast<double>(snap.base.tick - birth_tick_);
     double remaining_T = std::max(1.0, p_.T - elapsed);
 
-    double mid = static_cast<double>(snap.perceived_mid);
+    // Use fundamental value as reservation center when available; fall back to market mid.
+    double mid = snap.has_fundamental ? snap.fundamental_value
+                                      : static_cast<double>(snap.perceived_mid);
     if (mid <= 0.0) return {};
 
     // Net inventory in lots (read from snapshot if fundamental provided; else assume 0 start)
@@ -30,14 +32,25 @@ std::vector<Action> MarketMakerAS::on_market_data(const AgentSnapshot& snap) {
     double reservation = mid - q * p_.gamma * p_.sigma * p_.sigma * remaining_T;
     double spread_half  = 0.5 * (p_.gamma * p_.sigma * p_.sigma * remaining_T
                                  + (2.0 / p_.gamma) * std::log(1.0 + p_.gamma / p_.kappa));
-    spread_half = std::max(spread_half, 1.0);  // minimum 1 tick spread
+
+    // Regime-adaptive minimum half-spread: widen proportional to realized volatility.
+    // This ensures spread CoV > 0 across vol regimes (Fact 7 of stylized facts).
+    // kVolBaseline ≈ low-vol regime σ; in crash (rv ≈ 0.025) min_half grows to ~8 ticks.
+    constexpr double kVolBaseline = 0.003;
+    double rv = snap.base.realized_vol[0];
+    if (rv <= 0.0) rv = p_.sigma;  // fallback: use calibrated σ before history accumulates
+    double min_half = std::max(1.0, rv / kVolBaseline);
+    spread_half = std::max(spread_half, min_half);
 
     Price bid_px = static_cast<Price>(std::floor(reservation - spread_half));
     Price ask_px = static_cast<Price>(std::ceil (reservation + spread_half));
     if (bid_px <= 0 || ask_px <= bid_px) return {};
 
-    // GTT = current tick + 1: quotes expire next tick so stale quotes never linger.
-    Tick ttl = snap.base.tick + 1;
+    // TTL = prev_tick + 2: quotes submitted at tick (snap.tick + 1), expire at tick (snap.tick + 2).
+    // This ensures quotes survive expire(now) at the tick they are processed, then expire the
+    // following tick when fresh quotes have already been submitted. Using +1 would cause
+    // expire(now) to remove the quotes in the same tick they arrive (off-by-one).
+    Tick ttl = snap.base.tick + 2;
 
     return {
         submit(Side::Buy,  OrderType::Limit, bid_px, p_.qty, ttl),

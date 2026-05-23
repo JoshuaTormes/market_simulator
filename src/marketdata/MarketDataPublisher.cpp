@@ -51,8 +51,9 @@ MarketSnapshot MarketDataPublisher::publish(Tick now) {
             ? static_cast<double>(snap.spread) / static_cast<double>(snap.mid_price)
             : 0.0;
     } else {
-        // One or both sides empty — use last trade as anchor
-        snap.mid_price    = last_trade_price_;
+        // One or both sides empty — use fundamental as anchor to avoid bid-ask bounce bias.
+        // Falls back to last_trade_price_ only on tick 0 before fundamental is wired.
+        snap.mid_price    = (fundamental_price_ > 0) ? fundamental_price_ : last_trade_price_;
         snap.spread       = 0;
         snap.relative_spread = 0.0;
     }

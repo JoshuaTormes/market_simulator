@@ -29,6 +29,7 @@ public:
         double      dt               = 1.0;   // time units per tick
         int         publish_interval = 1;     // snapshot every N ticks
         std::string ticker           = "MAIN";
+        double      tick_size        = 0.01;  // dollars per tick — used to convert fundamental→ticks
     };
 
     SimulationLoop(

@@ -13,34 +13,37 @@ struct ParamRange {
 };
 
 struct MarketMakerParams {
-    int count = 2;
-    ParamRange<double> gamma_range    = {0.05, 0.3};
-    ParamRange<double> k_range        = {1.0,  5.0};
-    ParamRange<double> sigma_range    = {0.01, 0.05};
+    int count = 3;
+    ParamRange<double> gamma_range    = {0.05, 0.20};
+    ParamRange<double> k_range        = {1.0,  4.0};
+    ParamRange<double> sigma_range    = {0.01, 0.04};  // fractional vol per tick
     double T_horizon                  = 100.0;  // ticks
 };
 
 struct NoiseTraderParams {
-    int count = 20;
+    int count = 25;
     ParamRange<double> p_act_range    = {0.02, 0.10};
-    ParamRange<double> size_mu_range  = {0.5,  2.0};
-    double size_sigma                 = 0.5;
+    ParamRange<double> size_mu_range  = {0.5,  2.5};
+    double size_sigma                 = 1.5;
 };
 
 struct InformedTraderParams {
-    int count = 2;
+    // count=1: fewer informed traders reduces multi-tick directional pressure.
+    int count = 1;
     double lambda_inv                 = 0.5;
     ParamRange<double> signal_lag_range = {0, 5};
 };
 
 struct MomentumParams {
-    int count = 3;
+    // Momentum traders create positive return ACF by design. Keep at 0 to satisfy
+    // Fact 2 (|ACF(r,lag=1)| < 0.10). Vol clustering is provided by regime switching.
+    int count = 0;
     ParamRange<int>    fast_range     = {5,  15};
     ParamRange<int>    slow_range     = {20, 50};
 };
 
 struct MeanReverterParams {
-    int count = 3;
+    int count = 8;
     ParamRange<double> entry_z_range  = {1.5, 3.0};
     ParamRange<int>    window_range   = {20,  60};
 };
@@ -51,20 +54,22 @@ struct ValueInvestorParams {
 };
 
 struct InstitutionalParams {
-    int count = 1;
+    int count = 0;
     int parent_qty                    = 500;
     int slices                        = 20;
 };
 
 struct StopLossParams {
-    int count = 5;
+    int count = 6;
     ParamRange<double> trigger_range  = {0.02, 0.06};
     ParamRange<int>    qty_range      = {10,  100};
 };
 
 struct NewsReactorParams {
-    int count = 5;
-    ParamRange<double> lag_range      = {0, 10};
+    // lag_range = [0,1]: short lags so reactors fire within 1 tick of news.
+    // Larger lags create multi-tick directional order flow → positive return ACF (Fact 2 failure).
+    int count = 6;
+    ParamRange<double> lag_range      = {0, 1};
     ParamRange<double> sensitivity_range = {0.5, 2.0};
 };
 
@@ -84,7 +89,7 @@ struct PopulationConfig {
 
 // ── Fundamental value process config ──────────────────────────────────────
 
-enum class FundamentalProcessType { GBM, JumpDiffusion, OU, RegimeSwitching };
+enum class FundamentalProcessType { GBM, OU, JumpDiffusion, RegimeSwitching };
 
 struct FundamentalConfig {
     FundamentalProcessType type = FundamentalProcessType::RegimeSwitching;
@@ -100,20 +105,20 @@ struct FundamentalConfig {
     double jump_mean            = 0.0;
     double jump_sigma           = 0.03;
     // Regime switching (3 regimes: low_vol, high_vol, crash)
-    double regime_sigma[3]      = {0.005, 0.02, 0.08};
-    double regime_mu[3]         = {0.0,   0.0, -0.05};
+    double regime_sigma[3]      = {0.003, 0.010, 0.030};
+    double regime_mu[3]         = {0.0,   0.0,  -0.010};
     // Transition matrix (row = from, col = to)
     double regime_trans[3][3]   = {
-        {0.995, 0.004, 0.001},
-        {0.010, 0.985, 0.005},
-        {0.050, 0.100, 0.850}
+        {0.997, 0.002, 0.001},
+        {0.010, 0.988, 0.002},
+        {0.100, 0.150, 0.750}
     };
 };
 
 // ── News process config ────────────────────────────────────────────────────
 
 struct NewsConfig {
-    double lambda               = 0.001;  // events per tick
+    double lambda               = 0.005;  // events per tick
     double impact_df            = 3.0;    // Student-t degrees of freedom for magnitude
     double impact_scale         = 0.02;   // scale of the t-distribution
     int    duration_ticks       = 5;

@@ -76,7 +76,9 @@ TEST_CASE("MarketMakerAS: spread widens as remaining T shrinks", "[mm_as]") {
     CHECK(spread_long >= spread_short);
 }
 
-TEST_CASE("MarketMakerAS: uses TTL = tick + 1", "[mm_as]") {
+TEST_CASE("MarketMakerAS: uses TTL = tick + 2", "[mm_as]") {
+    // Quotes submitted at tick N carry TTL = snap.tick + 2 so they survive
+    // expire(now) at the tick they are processed and expire the following tick.
     RngService rng(42);
     MarketMakerAS::Params p;
     p.gamma = 0.1; p.kappa = 1.5; p.sigma = 0.02; p.T = 100.0; p.qty = 5;
@@ -87,7 +89,7 @@ TEST_CASE("MarketMakerAS: uses TTL = tick + 1", "[mm_as]") {
     for (auto& act : actions) {
         auto* so = std::get_if<SubmitOrder>(&act);
         REQUIRE(so != nullptr);
-        CHECK(so->ttl_expiry == 51);
+        CHECK(so->ttl_expiry == 52);
     }
 }
 

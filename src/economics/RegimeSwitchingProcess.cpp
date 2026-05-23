@@ -8,6 +8,8 @@ RegimeSwitchingProcess::RegimeSwitchingProcess(Config cfg, std::mt19937_64 rng)
 {
     assert(cfg.s0 > 0.0);
     assert(cfg.initial_regime >= 0 && cfg.initial_regime < kRegimes);
+    assert(cfg.nu > 2.0); // need finite variance for unit-variance normalization
+    student_t_ = std::student_t_distribution<double>{cfg_.nu};
 }
 
 void RegimeSwitchingProcess::transition_regime() {
@@ -26,7 +28,9 @@ void RegimeSwitchingProcess::transition_regime() {
 void RegimeSwitchingProcess::step(Tick /*now*/, double dt) {
     transition_regime();
     const Regime& r = cfg_.regimes[regime_];
-    double z = norm_(rng_);
+    // Student-t(ν) innovation normalized to unit variance: var[t(ν)] = ν/(ν-2).
+    // This preserves calibrated σ values while giving power-law tails with exponent ν.
+    double z = student_t_(rng_) / std::sqrt(cfg_.nu / (cfg_.nu - 2.0));
     log_s_ += (r.mu - 0.5 * r.sigma * r.sigma) * dt
              + r.sigma * std::sqrt(dt) * z;
 }
