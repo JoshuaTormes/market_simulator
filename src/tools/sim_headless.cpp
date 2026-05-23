@@ -61,11 +61,9 @@ int main(int argc, char** argv) {
     PositionLedger      ledger;
     Clearing            clearing(ledger, cfg.ticker);
     MarketDataPublisher publisher(matching.book());
-
-    // No seed orders: MMs have sees_fundamental=true and use the fundamental as their
-    // reservation-price anchor, so they act from tick 0 without a book reference price.
-    // Seed orders with no TTL would persist in the book after MM quotes expire each tick,
-    // pinning mid_price to a stale level and creating spurious positive return ACF.
+    // Bootstrap carry-forward: MMs no longer see the fundamental, so we set the
+    // initial mid from config. This gives the MM a non-zero price anchor on tick 0.
+    publisher.set_initial_mid(static_cast<Price>(cfg.initial_price_ticks));
 
     // ── Fundamental value: RegimeSwitching (default) ──────────────────────────
     RegimeSwitchingProcess::Config rs_cfg;

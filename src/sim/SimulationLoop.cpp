@@ -106,8 +106,6 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
     // 3. Agents observe previous snapshot and produce actions.
     // Convert fundamental value from dollar units to tick units (÷ tick_size).
     const double fundamental_ticks = fundamental_.current_value() / cfg_.tick_size;
-    // Keep publisher mid-price anchored to fundamental when book is empty (no bid-ask bounce).
-    publisher_.set_fundamental_price(static_cast<Price>(fundamental_ticks));
     auto agent_actions = runner_.run(prev_snap_, fundamental_ticks);
 
     // 4. Risk gate filters actions.

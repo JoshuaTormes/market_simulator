@@ -115,11 +115,13 @@ def run(csv_dir):
     print(f"Snapshots: {n_snaps}  |  Trades: {n_trades}")
     print()
 
-    # ── Contamination: spread==0 ticks ───────────────────────────────────────
+    # ── Empty-book ticks (spread==0) ─────────────────────────────────────────
+    # Pre-Etapa2: spread==0 → mid was set to fundamental (contamination).
+    # Post-Etapa2: spread==0 → mid is carry-forward of last valid market mid (contamination=0%).
     zero_spread_ticks = sum(1 for s in snaps if float(s["spread"]) == 0)
-    contamination_pct = 100.0 * zero_spread_ticks / n_snaps if n_snaps else 0
-    print(f"[CONTAMINATION] spread==0 ticks: {zero_spread_ticks}/{n_snaps} = {contamination_pct:.1f}%")
-    print(f"  -> mid set to fundamental on these ticks (target: 0%)")
+    empty_book_pct = 100.0 * zero_spread_ticks / n_snaps if n_snaps else 0
+    print(f"[EMPTY BOOK] spread==0 ticks: {zero_spread_ticks}/{n_snaps} = {empty_book_pct:.1f}%")
+    print(f"  -> mid is carry-forward (post-Etapa2) or fundamental (pre-Etapa2)")
     print()
 
     # ── Returns from valid ticks only ────────────────────────────────────────
@@ -136,10 +138,10 @@ def run(csv_dir):
                 returns_from_contaminated += 1
 
     n_ret = len(returns_all)
-    ret_contamination_pct = 100.0 * returns_from_contaminated / n_ret if n_ret else 0
+    ret_empty_book_pct = 100.0 * returns_from_contaminated / n_ret if n_ret else 0
     print(f"[RETURNS] n={n_ret}, mean={statistics.mean(returns_all):.4e}, "
           f"std={statistics.stdev(returns_all):.4e}")
-    print(f"  Returns touching contaminated tick: {returns_from_contaminated} ({ret_contamination_pct:.1f}%)")
+    print(f"  Returns spanning an empty-book tick: {returns_from_contaminated} ({ret_empty_book_pct:.1f}%)")
     print()
 
     # ── Price trajectory ──────────────────────────────────────────────────────

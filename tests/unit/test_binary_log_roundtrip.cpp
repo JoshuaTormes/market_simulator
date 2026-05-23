@@ -85,7 +85,7 @@ TEST_CASE("BinaryLog: market snapshot round-trip", "[binlog]") {
         s.realized_vol[1]   = 0.0200;
         s.realized_vol[2]   = 0.0350;
         s.vwap[0]           = 10045.5;
-        s.order_flow_imbalance = 0.31;
+        s.ofi_tick             = 0.31;
         s.trade_imbalance   = 0.55;
         s.momentum          = 0.002;
         s.book_imbalance[0] = 0.12;
@@ -104,7 +104,7 @@ TEST_CASE("BinaryLog: market snapshot round-trip", "[binlog]") {
     CHECK(sr->spread            == 4);
     CHECK(sr->realized_vol_s    == Catch::Approx(0.0123));
     CHECK(sr->vwap_s            == Catch::Approx(10045.5));
-    CHECK(sr->order_flow_imbalance == Catch::Approx(0.31));
+    CHECK(sr->ofi_tick             == Catch::Approx(0.31));
     CHECK(sr->regime            == 1);
 }
 

@@ -30,8 +30,9 @@ public:
     // Reads current book state and computes all snapshot fields.
     MarketSnapshot publish(Tick now);
 
-    // Set by SimulationLoop each tick so empty-book fallback tracks fundamental (not last trade).
-    void set_fundamental_price(Price p) { fundamental_price_ = p; }
+    // Set once at startup: initial mid for empty-book carry-forward on tick 0.
+    // Must be called before the first publish() call.
+    void set_initial_mid(Price p) { prev_valid_mid_ = p; }
 
 private:
     const OrderBookV2& book_;
@@ -41,7 +42,7 @@ private:
     Price last_trade_price_ = 0;
     Tick  last_trade_tick_  = 0;
     Price prev_mid_         = 0;  // mid from previous tick (for return calculation)
-    Price fundamental_price_ = 0; // set each tick by SimulationLoop for empty-book fallback
+    Price prev_valid_mid_   = 0;  // last mid formed by a two-sided book (carry-forward)
     double momentum_prev_   = 0.0;
     double tick_ofi_        = 0.0; // per-tick signed volume accumulator, reset each publish()
 
