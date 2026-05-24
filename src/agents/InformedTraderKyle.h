@@ -9,6 +9,7 @@ public:
         double signal_noise   = 0.005;  // N(0,σ) noise added to perceived fundamental
         double min_signal     = 2.0;    // minimum |signal| in ticks to act (avoids noise trading)
         Qty    max_order_size = 50;
+        double pareto_alpha   = 1.5;    // Pareto tail exponent for order sizing (0 = Kyle only)
     };
 
     InformedTraderKyle(AgentId id, const std::string& ticker,

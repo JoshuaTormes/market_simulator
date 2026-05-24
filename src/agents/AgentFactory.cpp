@@ -12,8 +12,9 @@
 #include <type_traits>
 
 AgentFactory::AgentFactory(const PopulationConfig& cfg, RngService& rng,
-                           const std::string& ticker, EventBus* bus)
-    : cfg_(cfg), rng_(rng), ticker_(ticker), bus_(bus)
+                           const std::string& ticker, EventBus* bus,
+                           PositionLedger* ledger)
+    : cfg_(cfg), rng_(rng), ticker_(ticker), bus_(bus), ledger_(ledger)
 {}
 
 template<typename T>
@@ -54,10 +55,11 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
             p));
     }
 
-    // Informed traders
+    // Informed traders — Pareto-multiplied Kyle sizes for heavy-tailed informed trades
     for (int i = 0; i < cfg_.informed_traders.count; ++i) {
         InformedTraderKyle::Params p;
-        p.lambda_inv = cfg_.informed_traders.lambda_inv;
+        p.lambda_inv   = cfg_.informed_traders.lambda_inv;
+        p.pareto_alpha = cfg_.informed_traders.pareto_alpha;
         InformationProfile ip;
         ip.sees_fundamental = true;
         agents.emplace_back(std::make_unique<InformedTraderKyle>(
@@ -94,24 +96,35 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
             p, RiskLimits{}, LatencyProfile{}, InformationProfile{}));
     }
 
-    // Institutional executor
+    // Institutional executor — Pareto-truncated child sizes for heavy-tailed trade flow
     for (int i = 0; i < cfg_.institutionals.count; ++i) {
         InstitutionalExecutor::Params p;
-        p.parent_qty   = static_cast<Qty>(cfg_.institutionals.parent_qty);
-        p.total_slices = cfg_.institutionals.slices;
+        p.parent_qty    = static_cast<Qty>(cfg_.institutionals.parent_qty);
+        p.total_slices  = cfg_.institutionals.slices;
+        p.pareto_alpha  = cfg_.institutionals.pareto_alpha;
+        p.max_child_qty = static_cast<Qty>(cfg_.institutionals.max_child_qty);
+        p.side = (i % 2 == 0) ? Side::Buy : Side::Sell;
         agents.emplace_back(std::make_unique<InstitutionalExecutor>(
             alloc_id(), ticker_, rng_.for_consumer("IE_" + std::to_string(i)),
             p));
     }
 
-    // Stop-loss clusters
+    // Stop-loss clusters — seeded with initial ledger position when ledger is wired
     for (int i = 0; i < cfg_.stop_loss.count; ++i) {
         StopLossCluster::Params p;
-        p.trigger_pct = sample(cfg_.stop_loss.trigger_range, eng);
-        p.qty         = static_cast<Qty>(sample(cfg_.stop_loss.qty_range, eng));
+        p.trigger_pct  = sample(cfg_.stop_loss.trigger_range, eng);
+        p.qty          = static_cast<Qty>(sample(cfg_.stop_loss.qty_range, eng));
+        p.entry_price  = static_cast<Price>(cfg_.stop_loss.entry_price_ticks);
+        p.initial_side = (i % 2 == 0) ? Side::Buy : Side::Sell;
+        AgentId aid = alloc_id();
         agents.emplace_back(std::make_unique<StopLossCluster>(
-            alloc_id(), ticker_, rng_.for_consumer("SL_" + std::to_string(i)),
-            p));
+            aid, ticker_, rng_.for_consumer("SL_" + std::to_string(i)), p));
+        // Seed the pre-existing position so the ledger path triggers on real P&L.
+        if (ledger_) {
+            Qty seed_qty = p.qty;
+            if (p.initial_side == Side::Sell) seed_qty = -seed_qty;
+            ledger_->seed(aid, ticker_, seed_qty, p.entry_price);
+        }
     }
 
     // News reactors

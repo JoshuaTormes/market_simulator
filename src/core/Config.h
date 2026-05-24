@@ -28,16 +28,16 @@ struct NoiseTraderParams {
 };
 
 struct InformedTraderParams {
-    // count=1: fewer informed traders reduces multi-tick directional pressure.
     int count = 1;
     double lambda_inv                 = 0.5;
+    double pareto_alpha               = 1.5;  // Pareto tail exponent for order sizing
     ParamRange<double> signal_lag_range = {0, 5};
 };
 
 struct MomentumParams {
-    // Momentum traders create positive return ACF by design. Keep at 0 to satisfy
-    // Fact 2 (|ACF(r,lag=1)| < 0.10). Vol clustering is provided by regime switching.
-    int count = 0;
+    // count=1: calibrated dose — one momentum trader provides mild herding without
+    // dominating the ACF. Full calibration is done in Etapa 8.
+    int count = 1;
     ParamRange<int>    fast_range     = {5,  15};
     ParamRange<int>    slow_range     = {20, 50};
 };
@@ -54,13 +54,16 @@ struct ValueInvestorParams {
 };
 
 struct InstitutionalParams {
-    int count = 0;
-    int parent_qty                    = 500;
-    int slices                        = 20;
+    int    count         = 1;     // re-enabled: Pareto sizing drives fat tails
+    int    parent_qty    = 500;
+    int    slices        = 20;
+    double pareto_alpha  = 1.5;   // Pareto tail exponent for child order sizing
+    int    max_child_qty = 200;   // hard cap per child order
 };
 
 struct StopLossParams {
-    int count = 6;
+    int   count                       = 6;
+    int64_t entry_price_ticks         = 10000; // reference price for seeded positions
     ParamRange<double> trigger_range  = {0.02, 0.06};
     ParamRange<int>    qty_range      = {10,  100};
 };

@@ -6,10 +6,12 @@
 class InstitutionalExecutor : public AgentBase {
 public:
     struct Params {
-        Side side           = Side::Buy;
-        Qty  parent_qty     = 500;    // total lots to execute
-        int  total_slices   = 20;     // number of child orders
-        int  ticks_between  = 5;      // ticks between child orders
+        Side   side          = Side::Buy;
+        Qty    parent_qty    = 500;   // total lots to execute
+        int    total_slices  = 20;    // number of child orders
+        int    ticks_between = 5;     // ticks between child orders
+        double pareto_alpha  = 1.5;   // Pareto tail exponent for child sizing (0 = uniform)
+        Qty    max_child_qty = 200;   // hard cap per child order
     };
 
     InstitutionalExecutor(AgentId id, const std::string& ticker,

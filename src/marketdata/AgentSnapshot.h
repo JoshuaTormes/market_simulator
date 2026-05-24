@@ -15,6 +15,7 @@ struct AgentSnapshot {
     double fundamental_value = 0.0; // filled only if sees_fundamental
     bool   has_fundamental   = false;
     double own_inventory = 0.0; // signed lot position from PositionLedger (filled by AgentRunner)
+    double own_avg_cost  = 0.0; // average entry price in tick units from PositionLedger
 
     // Derive from a (possibly historical) MarketSnapshot.
     // rng_eng must be pre-seeded from RngService::for_consumer(agent_id + tick).

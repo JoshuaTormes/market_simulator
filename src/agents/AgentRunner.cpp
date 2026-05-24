@@ -37,8 +37,10 @@ std::vector<AgentAction> AgentRunner::run(const MarketSnapshot& snap,
             as.fundamental_value = fundamental_value;
             as.has_fundamental   = true;
         }
-        if (ledger_ && !ticker_.empty())
+        if (ledger_ && !ticker_.empty()) {
             as.own_inventory = static_cast<double>(ledger_->net_qty(agent->id(), ticker_));
+            as.own_avg_cost  = static_cast<double>(ledger_->avg_cost(agent->id(), ticker_));
+        }
 
         auto actions = agent->on_market_data(as);
         for (auto& act : actions)

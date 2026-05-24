@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
     PoissonNewsProcess news(news_cfg, rng.for_consumer("news"), &bus);
 
     // ── Agents: full default population ──────────────────────────────────────
-    AgentFactory factory(cfg.population, rng, cfg.ticker, &bus);
+    AgentFactory factory(cfg.population, rng, cfg.ticker, &bus, &ledger);
     auto owned_agents = factory.create_all();
 
     std::vector<IAgent*> agent_ptrs;

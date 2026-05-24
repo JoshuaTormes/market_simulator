@@ -1,15 +1,16 @@
 #pragma once
-// Cluster of stop-loss orders that trigger a cascade when price breaches a level.
-// Models the stop-loss cascade mechanism described in Cont & Wagalath (2013).
+// Stop-loss cluster: fires a liquidation market order when unrealized P&L from the
+// ledger (own_inventory × own_avg_cost) breaches a loss threshold.
+// Models the cascade mechanism described in Cont & Wagalath (2013).
 #include "AgentBase.h"
 
 class StopLossCluster : public AgentBase {
 public:
     struct Params {
-        Side  initial_side   = Side::Buy;   // side of the initial position
-        Price entry_price    = 10000;       // initial position price (ticks)
-        double trigger_pct   = 0.03;        // stop triggers at entry ± trigger_pct * entry
-        Qty   qty            = 50;
+        Side   initial_side = Side::Buy;  // direction of the seeded position
+        Price  entry_price  = 10000;      // fallback reference price when ledger has no position
+        double trigger_pct  = 0.03;       // stop at entry ± trigger_pct * entry_price
+        Qty    qty          = 50;         // fallback qty when ledger has no position
     };
 
     StopLossCluster(AgentId id, const std::string& ticker,
@@ -22,5 +23,5 @@ public:
 private:
     Params p_;
     bool   triggered_ = false;
-    Price  stop_level_ = 0;
+    Price  stop_level_ = 0;  // computed from params at construction (fallback path)
 };

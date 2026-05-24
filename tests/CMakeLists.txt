@@ -42,6 +42,7 @@ add_sim_test(test_news_process           unit/test_news_process.cpp)
 # Phase 5
 add_sim_test(test_market_maker_as        unit/test_market_maker_as.cpp)
 add_sim_test(test_market_maker_bayesian  unit/test_market_maker_bayesian.cpp)
+add_sim_test(test_stop_loss_ledger       unit/test_stop_loss_ledger.cpp)
 add_sim_test(test_kyle_informed          unit/test_kyle_informed.cpp)
 add_sim_test(test_noise_trader           unit/test_noise_trader.cpp)
 add_sim_test(test_risk_gate              unit/test_risk_gate.cpp)

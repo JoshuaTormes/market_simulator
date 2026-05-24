@@ -1,6 +1,7 @@
-// TWAP: child_qty = parent_qty / total_slices, submitted every ticks_between ticks.
+// TWAP with Pareto-distributed child sizes: heavy-tailed trade flow → fat-tailed returns.
 #include "InstitutionalExecutor.h"
 #include <algorithm>
+#include <cmath>
 
 InstitutionalExecutor::InstitutionalExecutor(AgentId id, const std::string& ticker,
                                              std::mt19937_64 rng, Params p,
@@ -23,9 +24,22 @@ std::vector<Action> InstitutionalExecutor::on_market_data(const AgentSnapshot& s
     int slices_left = p_.total_slices - slices_done_;
     if (slices_left <= 0) return {};
 
-    Qty child_qty = remaining_ / slices_left;
-    child_qty     = std::max(child_qty, Qty{1});
-    child_qty     = std::min(child_qty, remaining_);
+    Qty base_qty  = remaining_ / slices_left;
+    base_qty      = std::max(base_qty, Qty{1});
+
+    Qty child_qty = base_qty;
+    if (p_.pareto_alpha > 0.0) {
+        // Pareto(1, alpha) draw — unbiased multiplier: E = 1 when alpha > 1.
+        // u clamped away from 1.0 to avoid infinite draw.
+        std::uniform_real_distribution<double> u_dist(0.0, 0.9999);
+        double u = u_dist(rng_);
+        double multiplier = ((p_.pareto_alpha - 1.0) / p_.pareto_alpha)
+                          * std::pow(1.0 - u, -1.0 / p_.pareto_alpha);
+        child_qty = static_cast<Qty>(std::max(1.0, std::round(
+                        std::min(static_cast<double>(p_.max_child_qty),
+                                 static_cast<double>(base_qty) * multiplier))));
+    }
+    child_qty = std::min(child_qty, remaining_);
 
     remaining_    -= child_qty;
     ++slices_done_;
