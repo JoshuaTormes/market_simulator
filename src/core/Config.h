@@ -97,7 +97,7 @@ enum class FundamentalProcessType { GBM, OU, JumpDiffusion, RegimeSwitching };
 struct FundamentalConfig {
     FundamentalProcessType type = FundamentalProcessType::RegimeSwitching;
     double initial_value        = 100.0;
-    // GBM / per-regime
+    // GBM / per-regime shared drift+vol
     double mu                   = 0.0;
     double sigma                = 0.01;
     // OU
@@ -107,14 +107,16 @@ struct FundamentalConfig {
     double jump_intensity       = 0.005;
     double jump_mean            = 0.0;
     double jump_sigma           = 0.03;
-    // Regime switching (3 regimes: low_vol, high_vol, crash)
-    double regime_sigma[3]      = {0.003, 0.010, 0.030};
-    double regime_mu[3]         = {0.0,   0.0,  -0.010};
-    // Transition matrix (row = from, col = to)
+    // Regime switching — defaults match RegimeSwitchingProcess internal calibration
+    double nu                   = 3.5;    // Student-t degrees of freedom for innovations
+    bool   gaussian_innovations = false;  // if true, use N(0,1) instead of Student-t
+    double regime_sigma[3]      = {0.003, 0.010, 0.025};  // low_vol, high_vol, crash
+    double regime_mu[3]         = {0.0,   0.0,   0.0};    // pure martingale in all regimes
+    // Transition matrix (row = from, col = to) — fast crash recovery (~1.5 ticks avg)
     double regime_trans[3][3]   = {
-        {0.997, 0.002, 0.001},
-        {0.010, 0.988, 0.002},
-        {0.100, 0.150, 0.750}
+        {0.990, 0.007, 0.003},
+        {0.050, 0.940, 0.010},
+        {0.350, 0.300, 0.350}
     };
 };
 

@@ -10,7 +10,7 @@
 #include "marketdata/SnapshotBuffer.h"
 #include "marketdata/TradeTapeBuffer.h"
 #include "marketdata/AgentStateBuffer.h"
-#include "economics/RegimeSwitchingProcess.h"
+#include "economics/FundamentalProcessFactory.h"
 #include "economics/PoissonNewsProcess.h"
 #include "agents/AgentFactory.h"
 #include "agents/AgentRunner.h"
@@ -56,14 +56,17 @@ int main(int argc, char** argv) {
     MarketDataPublisher publisher(matching.book());
 
     // ── Fundamental value + news ─────────────────────────────────────────────
-    RegimeSwitchingProcess::Config rs_cfg;
-    rs_cfg.s0 = cfg.fundamental.initial_value;
-    RegimeSwitchingProcess fundamental(rs_cfg, rng.for_consumer("fundamental"));
+    auto fundamental_ptr = make_fundamental_process(cfg.fundamental,
+                                                    rng.for_consumer("fundamental"));
+    IFundamentalValueProcess& fundamental = *fundamental_ptr;
 
     PoissonNewsProcess::Config news_cfg;
-    news_cfg.lambda          = cfg.news.lambda;
-    news_cfg.magnitude_scale = cfg.news.impact_scale;
-    news_cfg.ticker          = cfg.ticker;
+    news_cfg.lambda           = cfg.news.lambda;
+    news_cfg.magnitude_scale  = cfg.news.impact_scale;
+    news_cfg.student_t_df     = static_cast<int>(cfg.news.impact_df);
+    news_cfg.duration_ticks   = static_cast<double>(cfg.news.duration_ticks);
+    news_cfg.dispersion_sigma = cfg.news.dispersion;
+    news_cfg.ticker           = cfg.ticker;
     PoissonNewsProcess news(news_cfg, rng.for_consumer("news"), &bus);
 
     // ── Agents ───────────────────────────────────────────────────────────────

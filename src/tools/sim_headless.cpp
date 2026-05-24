@@ -1,4 +1,4 @@
-// CLI: sim_headless [--seed N] [--duration N] [--output path] [--ticker T]
+// CLI: sim_headless [--seed N] [--duration N] [--output path] [--ticker T] [--process regime|gbm|ou|jump]
 // Runs the full simulation headlessly (no UI) and writes a binary log.
 // Uses the same component wiring as main.cpp but without SFML/ImGui.
 #include "analysis/Report.h"
@@ -12,7 +12,7 @@
 #include "clearing/Clearing.h"
 #include "marketdata/MarketDataPublisher.h"
 #include "marketdata/SnapshotBuffer.h"
-#include "economics/RegimeSwitchingProcess.h"
+#include "economics/FundamentalProcessFactory.h"
 #include "economics/PoissonNewsProcess.h"
 #include "agents/AgentFactory.h"
 #include "agents/AgentRunner.h"
@@ -36,6 +36,14 @@ int main(int argc, char** argv) {
         if (key == "--duration") cfg.max_ticks       = static_cast<uint64_t>(std::stoul(argv[i+1]));
         if (key == "--output")   cfg.log_output_path = argv[i+1];
         if (key == "--ticker")   cfg.ticker          = argv[i+1];
+        if (key == "--process") {
+            std::string proc = argv[i+1];
+            if      (proc == "gbm")    cfg.fundamental.type = FundamentalProcessType::GBM;
+            else if (proc == "ou")     cfg.fundamental.type = FundamentalProcessType::OU;
+            else if (proc == "jump")   cfg.fundamental.type = FundamentalProcessType::JumpDiffusion;
+            else                       cfg.fundamental.type = FundamentalProcessType::RegimeSwitching;
+        }
+        if (key == "--gaussian") cfg.fundamental.gaussian_innovations = true;
     }
 
     std::filesystem::create_directories(
@@ -65,15 +73,19 @@ int main(int argc, char** argv) {
     // initial mid from config. This gives the MM a non-zero price anchor on tick 0.
     publisher.set_initial_mid(static_cast<Price>(cfg.initial_price_ticks));
 
-    // ── Fundamental value: RegimeSwitching (default) ──────────────────────────
-    RegimeSwitchingProcess::Config rs_cfg;
-    rs_cfg.s0 = cfg.fundamental.initial_value;
-    RegimeSwitchingProcess fundamental(rs_cfg, rng.for_consumer("fundamental"));
+    // ── Fundamental value: selected via --process flag ────────────────────────
+    auto fundamental_ptr = make_fundamental_process(cfg.fundamental,
+                                                    rng.for_consumer("fundamental"));
+    IFundamentalValueProcess& fundamental = *fundamental_ptr;
 
+    // ── News process — fully wired from NewsConfig ────────────────────────────
     PoissonNewsProcess::Config news_cfg;
-    news_cfg.lambda          = cfg.news.lambda;
-    news_cfg.magnitude_scale = cfg.news.impact_scale;
-    news_cfg.ticker          = cfg.ticker;
+    news_cfg.lambda           = cfg.news.lambda;
+    news_cfg.magnitude_scale  = cfg.news.impact_scale;
+    news_cfg.student_t_df     = static_cast<int>(cfg.news.impact_df);
+    news_cfg.duration_ticks   = static_cast<double>(cfg.news.duration_ticks);
+    news_cfg.dispersion_sigma = cfg.news.dispersion;
+    news_cfg.ticker           = cfg.ticker;
     PoissonNewsProcess news(news_cfg, rng.for_consumer("news"), &bus);
 
     // ── Agents: full default population ──────────────────────────────────────

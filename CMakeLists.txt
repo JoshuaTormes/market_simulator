@@ -76,6 +76,7 @@ set(CORE_SRC
     src/economics/OUProcess.cpp
     src/economics/RegimeSwitchingProcess.cpp
     src/economics/PoissonNewsProcess.cpp
+    src/economics/FundamentalProcessFactory.cpp
     # Phase 5
     src/agents/AgentBase.cpp
     src/agents/MarketMakerAS.cpp
