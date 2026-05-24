@@ -159,6 +159,12 @@ target_include_directories(sim_headless PRIVATE src)
 target_link_libraries(sim_headless PRIVATE sim_core)
 target_compile_options(sim_headless PRIVATE ${SIM_WARN_FLAGS})
 
+# ── sim_calibrate: ensemble harness (N seeds → mean ± std per fact) ─────────
+add_executable(sim_calibrate src/tools/sim_calibrate.cpp)
+target_include_directories(sim_calibrate PRIVATE src)
+target_link_libraries(sim_calibrate PRIVATE sim_core)
+target_compile_options(sim_calibrate PRIVATE ${SIM_WARN_FLAGS})
+
 # ── analysis tools (no UI) ─────────────────────────────────────────────────
 add_subdirectory(analysis)
 

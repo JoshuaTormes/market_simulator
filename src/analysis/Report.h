@@ -19,6 +19,7 @@ struct StyleResult {
     bool        passed    = false;
     double      value     = 0.0;
     double      threshold = 0.0;
+    double      ci_band   = 0.0;  // 95% confidence band (where applicable, e.g. ACF)
     std::string description;
 };
 
@@ -30,6 +31,14 @@ struct AnalysisReport {
     size_t n_trades      = 0;   // total trades in log
     size_t n_snapshots   = 0;   // total snapshots in log
     int    flash_crashes = 0;   // detected flash-crash events (informational)
+
+    // Extra diagnostics (not counted in pass/fail, reported separately)
+    double ljung_box_q     = 0.0; // Ljung-Box Q(10) for returns (H0: white noise)
+    int    ljung_box_df    = 10;  // degrees of freedom
+    double trade_sign_acf1 = 0.0; // ACF(trade_sign, lag=1) — order splitting indicator
+    double vol_vol_corr    = 0.0; // Pearson corr(|return|, trade_volume_per_period)
+    double hill_alpha_mean = 0.0; // Mean Hill α across multiple k values
+    double hill_alpha_std  = 0.0; // Std of Hill α (stability measure)
 
     // Markdown-formatted table string.
     std::string to_text() const;
