@@ -14,6 +14,7 @@ struct AgentSnapshot {
     Price perceived_last = 0;   // last_trade_price + N(0, sigma)
     double fundamental_value = 0.0; // filled only if sees_fundamental
     bool   has_fundamental   = false;
+    double own_inventory = 0.0; // signed lot position from PositionLedger (filled by AgentRunner)
 
     // Derive from a (possibly historical) MarketSnapshot.
     // rng_eng must be pre-seeded from RngService::for_consumer(agent_id + tick).

@@ -1,8 +1,9 @@
 #include "AgentRunner.h"
 #include <random>
 
-AgentRunner::AgentRunner(std::vector<IAgent*> agents, uint64_t seed)
-    : agents_(std::move(agents)), seed_(seed)
+AgentRunner::AgentRunner(std::vector<IAgent*> agents, uint64_t seed,
+                         PositionLedger* ledger, std::string ticker)
+    : agents_(std::move(agents)), seed_(seed), ledger_(ledger), ticker_(std::move(ticker))
 {}
 
 std::vector<AgentAction> AgentRunner::run(const MarketSnapshot& snap,
@@ -36,6 +37,8 @@ std::vector<AgentAction> AgentRunner::run(const MarketSnapshot& snap,
             as.fundamental_value = fundamental_value;
             as.has_fundamental   = true;
         }
+        if (ledger_ && !ticker_.empty())
+            as.own_inventory = static_cast<double>(ledger_->net_qty(agent->id(), ticker_));
 
         auto actions = agent->on_market_data(as);
         for (auto& act : actions)
