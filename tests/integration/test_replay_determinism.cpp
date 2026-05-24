@@ -81,7 +81,7 @@ static Price run_sim(uint64_t seed, const std::string& log_path) {
     std::vector<IAgent*> ptrs;
     for (auto& a : owned) ptrs.push_back(a.get());
 
-    AgentRunner runner(ptrs);
+    AgentRunner runner(ptrs, 42u);
     RiskGate    risk_gate(ledger, TICKER);
     Logger      logger;
 

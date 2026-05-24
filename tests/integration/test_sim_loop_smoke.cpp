@@ -77,7 +77,7 @@ TEST_CASE("SimulationLoop smoke: 500 ticks, no crash, conservation holds", "[smo
     std::vector<IAgent*> ptrs;
     for (auto& a : owned) ptrs.push_back(a.get());
 
-    AgentRunner runner(ptrs);
+    AgentRunner runner(ptrs, 42u);
     RiskGate    risk_gate(ledger, TICKER);
 
     Logger logger;  // no-op sink
@@ -135,7 +135,7 @@ TEST_CASE("SimulationLoop smoke: deterministic — same seed same result", "[smo
         std::vector<IAgent*> ptrs;
         for (auto& a : owned) ptrs.push_back(a.get());
 
-        AgentRunner runner(ptrs);
+        AgentRunner runner(ptrs, 42u);
         RiskGate    risk_gate(ledger, TICKER);
         Logger      logger;
 

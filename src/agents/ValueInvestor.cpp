@@ -7,19 +7,26 @@ ValueInvestor::ValueInvestor(AgentId id, const std::string& ticker,
                              RiskLimits rl, LatencyProfile lp, InformationProfile ip)
     : AgentBase(id, ticker, std::move(rng), rl, lp, ip)
     , p_(p)
+    , belief_noise_dist_(0.0, p.belief_noise)
 {}
 
 std::vector<Action> ValueInvestor::on_market_data(const AgentSnapshot& snap) {
-    if (!snap.has_fundamental) return {};
-
-    double fundamental = snap.fundamental_value;
-    double price       = static_cast<double>(snap.perceived_mid);
+    double price = static_cast<double>(snap.perceived_mid);
     if (price <= 0.0) return {};
 
-    double signal = fundamental - price;
+    // Initialize belief to first observed price, then update via slow EMA + noise.
+    if (belief_ <= 0.0) {
+        belief_ = price;
+        return {};
+    }
+    belief_ = (1.0 - p_.belief_alpha) * belief_
+            + p_.belief_alpha * price
+            + belief_noise_dist_(rng_);
+
+    double signal = belief_ - price;
     if (std::abs(signal) < p_.min_signal) return {};
 
-    // Target position proportional to mispricing; move kappa fraction toward target each tick.
+    // Target position proportional to perceived mispricing.
     double target  = p_.kappa * signal;
     double delta   = target - static_cast<double>(position_);
     Qty    order_q = static_cast<Qty>(std::abs(std::round(delta)));

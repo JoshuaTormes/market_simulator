@@ -21,9 +21,9 @@ std::vector<Action> MarketMakerAS::on_market_data(const AgentSnapshot& snap) {
     double elapsed = static_cast<double>(snap.base.tick - birth_tick_);
     double remaining_T = std::max(1.0, p_.T - elapsed);
 
-    // Use fundamental value as reservation center when available; fall back to market mid.
-    double mid = snap.has_fundamental ? snap.fundamental_value
-                                      : static_cast<double>(snap.perceived_mid);
+    // Quote around market mid (carry-forward when book is empty).
+    // MM no longer sees the fundamental — Bayesian belief wiring comes in Etapa 4.
+    double mid = static_cast<double>(snap.perceived_mid);
     if (mid <= 0.0) return {};
 
     // Net inventory in lots (read from snapshot if fundamental provided; else assume 0 start)

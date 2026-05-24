@@ -31,18 +31,16 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
     std::mt19937_64 eng = rng_.for_consumer("AgentFactory");
     std::vector<std::unique_ptr<IAgent>> agents;
 
-    // Market makers — see fundamental so quotes center on fundamental value
+    // Market makers — Bayesian: infer value from order flow, not from fundamental
     for (int i = 0; i < cfg_.market_makers.count; ++i) {
         MarketMakerAS::Params p;
         p.gamma = sample(cfg_.market_makers.gamma_range, eng);
         p.kappa = sample(cfg_.market_makers.k_range, eng);
         p.sigma = sample(cfg_.market_makers.sigma_range, eng);
         p.T     = cfg_.market_makers.T_horizon;
-        InformationProfile ip;
-        ip.sees_fundamental = true;
         agents.emplace_back(std::make_unique<MarketMakerAS>(
             alloc_id(), ticker_, rng_.for_consumer("MM_" + std::to_string(i)),
-            p, RiskLimits{}, LatencyProfile{}, ip));
+            p, RiskLimits{}, LatencyProfile{}, InformationProfile{}));
     }
 
     // Noise traders
@@ -87,15 +85,13 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
             p));
     }
 
-    // Value investors
+    // Value investors — act on own noisy belief about fair value (no direct fundamental access)
     for (int i = 0; i < cfg_.value_investors.count; ++i) {
         ValueInvestor::Params p;
         p.kappa = sample(cfg_.value_investors.k_range, eng);
-        InformationProfile ip;
-        ip.sees_fundamental = true;
         agents.emplace_back(std::make_unique<ValueInvestor>(
             alloc_id(), ticker_, rng_.for_consumer("VI_" + std::to_string(i)),
-            p, RiskLimits{}, LatencyProfile{}, ip));
+            p, RiskLimits{}, LatencyProfile{}, InformationProfile{}));
     }
 
     // Institutional executor

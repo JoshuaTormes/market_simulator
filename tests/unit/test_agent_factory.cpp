@@ -74,10 +74,11 @@ TEST_CASE("AgentFactory: agents have unique IDs", "[factory]") {
         CHECK(cnt == 1);
 }
 
-TEST_CASE("AgentFactory: informed traders have sees_fundamental = true", "[factory]") {
+TEST_CASE("AgentFactory: only InformedTraderKyle sees fundamental", "[factory]") {
     PopulationConfig cfg;
     cfg.informed_traders.count  = 2;
     cfg.value_investors.count   = 1;
+    cfg.market_makers.count     = 1;
 
     RngService rng(42);
     AgentFactory factory(cfg, rng, "T");
@@ -85,7 +86,10 @@ TEST_CASE("AgentFactory: informed traders have sees_fundamental = true", "[facto
 
     for (const auto& a : agents) {
         std::string t = a->type();
-        if (t == "InformedTraderKyle" || t == "ValueInvestor")
-            CHECK(a->info().sees_fundamental);
+        if (t == "InformedTraderKyle") {
+            CHECK(a->info().sees_fundamental);  // only informed traders have fundamental access
+        } else {
+            CHECK_FALSE(a->info().sees_fundamental);  // MM and VI no longer see fundamental
+        }
     }
 }

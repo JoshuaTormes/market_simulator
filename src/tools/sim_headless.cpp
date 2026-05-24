@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     agent_ptrs.reserve(owned_agents.size());
     for (auto& a : owned_agents) agent_ptrs.push_back(a.get());
 
-    AgentRunner runner(agent_ptrs);
+    AgentRunner runner(agent_ptrs, rng.global_seed());
     RiskGate    risk_gate(ledger, cfg.ticker);
 
     // ── SimulationLoop ───────────────────────────────────────────────────────

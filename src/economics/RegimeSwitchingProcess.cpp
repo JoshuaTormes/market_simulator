@@ -28,9 +28,14 @@ void RegimeSwitchingProcess::transition_regime() {
 void RegimeSwitchingProcess::step(Tick /*now*/, double dt) {
     transition_regime();
     const Regime& r = cfg_.regimes[regime_];
-    // Student-t(ν) innovation normalized to unit variance: var[t(ν)] = ν/(ν-2).
-    // This preserves calibrated σ values while giving power-law tails with exponent ν.
-    double z = student_t_(rng_) / std::sqrt(cfg_.nu / (cfg_.nu - 2.0));
+    double z;
+    if (cfg_.gaussian_innovations) {
+        // Gaussian mode: proves fat tails emerge from microstructure, not from t-innovations.
+        z = normal_(rng_);
+    } else {
+        // Student-t(ν) normalized to unit variance: var[t(ν)] = ν/(ν-2).
+        z = student_t_(rng_) / std::sqrt(cfg_.nu / (cfg_.nu - 2.0));
+    }
     log_s_ += (r.mu - 0.5 * r.sigma * r.sigma) * dt
              + r.sigma * std::sqrt(dt) * z;
 }

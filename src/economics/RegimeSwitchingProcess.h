@@ -22,24 +22,23 @@ public:
         // Degrees of freedom for Student-t innovations. ν=3.5 → tail index α≈3.5 ∈ [1.8,6].
         // Innovations are normalized to unit variance so calibrated sigma values are preserved.
         double nu = 3.5;
-        // mu_low/high = +7.3e-5 compensates crash drift so E[delta_log_s]=0 long-run.
-        // Without compensation: crash (π≈0.6%, μ=-0.010) causes -3.0 cumulative log-drift
-        // over 50k ticks, collapsing the fundamental near zero and distorting all stylized facts.
-        // Compensating drift: π_low*μ_low + π_high*μ_high + π_crash*μ_crash ≈ 0.
+        // All μ = 0: log-value is a martingale. No compensatory drift hack needed;
+        // stylized facts (fat tails, clustering) must emerge from market microstructure.
         std::array<Regime, kRegimes> regimes = {{
-            {+7.3e-5,  0.003},  // 0: low_vol  (quiet random walk, tiny upward drift to stay trend-neutral)
-            {+7.3e-5,  0.010},  // 1: high_vol (elevated vol, same compensating drift)
-            {-0.010,   0.025}   // 2: crash    (brief intense vol, strong negative drift → negative skew)
+            {0.0,  0.003},  // 0: low_vol  (quiet martingale random walk)
+            {0.0,  0.010},  // 1: high_vol (elevated vol martingale)
+            {0.0,  0.025}   // 2: crash    (spike in vol — microstructure creates skew via stops)
         }};
         // Row i = transition probabilities from regime i.
         // Steady-state: ~86% low_vol, ~13% high_vol, ~0.6% crash.
-        // Crashes are brief (avg ~1.5 ticks) but frequent enough for fat tails and negative skew.
         std::array<std::array<double, kRegimes>, kRegimes> trans = {{
             {0.990, 0.007, 0.003},  // low_vol  → mostly stays, some to high_vol/crash
             {0.050, 0.940, 0.010},  // high_vol → recovers 5%/tick, some to crash
             {0.350, 0.300, 0.350}   // crash    → fast recovery (avg ~1.5 ticks)
         }};
-        int initial_regime = 0;
+        int  initial_regime       = 0;
+        // Emergence test flag: Gaussian innovations prove fat tails come from microstructure.
+        bool gaussian_innovations = false;
     };
 
     RegimeSwitchingProcess(Config cfg, std::mt19937_64 rng);
@@ -57,7 +56,8 @@ private:
     double log_s_;
     int    regime_;
     std::mt19937_64 rng_;
-    std::student_t_distribution<double> student_t_{3.5};
+    std::student_t_distribution<double>    student_t_{3.5};
+    std::normal_distribution<double>       normal_{0.0, 1.0};
     std::uniform_real_distribution<double> uni_{0.0, 1.0};
 
     void transition_regime();
