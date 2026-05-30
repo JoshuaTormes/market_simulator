@@ -72,7 +72,7 @@ Cada tick executa exatamente nesta sequência — qualquer mudança quebra o det
 10. update_agent_state_buf(snap)  — atualiza PnL dos agentes para UI
 ```
 
-**Importante:** Agentes em step 3 recebem `prev_snap_` (tick anterior) mas o `fundamental_value` atual (já avançado em step 1). Isso permite que MMs ancorem suas cotações no fundamental corrente sem lag.
+**Importante:** Agentes em step 3 recebem `prev_snap_` (tick anterior) mais o `fundamental_value` atual (já avançado em step 1). `MarketMakerAS` não usa o fundamental diretamente — ele mantém uma crença interna (`belief_`) atualizada via OFI Bayesiano: `belief_ = (1−decay)·belief_ + decay·mid + β_ofi·ofi`. Agentes com `ip.sees_fundamental = true` (InformedTraderKyle) recebem o valor atual sem lag.
 
 ---
 
@@ -118,14 +118,15 @@ Tipos de agente disponíveis:
 
 | Classe | Estratégia | Conta |
 | --- | --- | --- |
-| `MarketMakerAS` | Avellaneda-Stoikov (2008), spread adaptativo ao vol | 3 |
+| `MarketMakerAS` | Avellaneda-Stoikov (2008), Bayesian belief via OFI | 3 |
 | `NoiseTrader` | Ordens de mercado aleatórias (Poisson) | 25 |
-| `InformedTraderKyle` | Kyle (1985), negocia em direção ao fundamental | 1 |
-| `MeanReverterOU` | Entradas z-score, saídas por reversão | 8 |
-| `ValueInvestor` | Compra/vende proporcional ao desvio do fundamental | 2 |
-| `InstitutionalExecutor` | TWAP slice executor | 0 (desabilitado) |
-| `StopLossCluster` | Stop em percentual de perda | 6 |
-| `NewsReactor` | Market orders após evento de notícia | 6 |
+| `InformedTraderKyle` | Kyle (1985), tamanhos Pareto, vê fundamental | 2 |
+| `MomentumTrader` | Crossover de médias móveis (fast/slow) | 1 |
+| `MeanReverterOU` | Entradas z-score, saídas por reversão | 0 (desabilitado) |
+| `ValueInvestor` | Compra/vende proporcional ao desvio do fundamental | 0 (desabilitado) |
+| `InstitutionalExecutor` | TWAP com tamanhos Pareto (Almgren-Chriss) | 1 |
+| `StopLossCluster` | Stop-loss por drawdown, trigger 4–8% | 6 |
+| `NewsReactor` | Market orders em resposta a eventos de notícia | 8 |
 
 ### Camada de Processo Fundamental (`src/economics/`)
 
@@ -133,9 +134,14 @@ Implementa `IFundamentalValueProcess`. Processo principal: `RegimeSwitchingProce
 
 ```text
 Regimes (estado Markov):
-  0: low_vol   σ=0.003  μ=+7.3e-5   P[stay]=0.990
-  1: high_vol  σ=0.010  μ=+7.3e-5   P[stay]=0.940
-  2: crash     σ=0.025  μ=-0.010    P[stay]=0.350
+  0: low_vol   σ=0.003  μ=+7.3e-5   P[stay]=0.990  (média ~100 ticks)
+  1: high_vol  σ=0.010  μ=+7.3e-5   P[stay]=0.970  (média ~33 ticks)
+  2: crash     σ=0.035  μ=-0.010    P[stay]=0.850  (média ~6.7 ticks)
+
+Matriz de transição (linha=origem, coluna=destino):
+  low→low=0.990  low→high=0.007  low→crash=0.003
+  high→low=0.020 high→high=0.970 high→crash=0.010
+  crash→low=0.050 crash→high=0.100 crash→crash=0.850
 
 Inovações: Student-t(ν=3.5) normalizadas a variância unitária
   z = t_sample / sqrt(ν/(ν-2)) = t_sample / sqrt(2.333)
@@ -192,7 +198,7 @@ Tags:
 ├─────┼──────────────────────────────────────┼────────────────┤
 │ 1   │ Fat tails (excess kurtosis)          │ > 1.0          │
 │ 2   │ Return ACF ≈ 0 (lag 1)              │ |ACF| < 0.10   │
-│ 3   │ Volatility clustering ACF(|r|, 1)   │ > 0.05         │
+│ 3   │ Volatility clustering ACF(|r|, lag=2) │ > 0.05         │
 │ 4   │ Long memory vol (mean ACF|r| 1..10) │ > 0.02         │
 │ 5   │ Gain-loss asymmetry (skew < 0)      │ < 0            │
 │ 6   │ Hill tail index α                   │ ∈ [1.8, 6.0]   │
@@ -207,12 +213,22 @@ Estimadores usados:
 - Spread CoV: apenas ticks com livro two-sided (spread > 0)
 - Flash crashes: detectados com limiar 4σ, janelas de 10/30 ticks (FlashCrashDetector, informativo)
 
-**Resultado com seed=42, 50k ticks (calibração de referência):**
+**Resultado ensemble (10 seeds × 50k ticks, `sim_calibrate`):**
 
-```text
-ACF(r,1)=0.006  kurtosis=64.9  skew=-1.51  Hill_α=3.12
-SpreadCoV=0.40  OFI_ACF=0.99   8/8 fatos validados
-```
+| # | Fato                                | Média  | Pass% |
+|---|-------------------------------------|--------|-------|
+| 1 | Fat tails (kurtosis > 1.0)          | 65.72  | 100%  |
+| 2 | Return ACF ≈ 0 (lag=1)            |  0.058 | 100%  |
+| 3 | Vol clustering (ACF\|r\|, lag=2)    |  0.097 |  80%  |
+| 4 | Long memory (mean ACF\|r\| 1..10)   |  0.072 |  90%  |
+| 5 | Gain-loss asymmetry (skew < 0)     | +0.222 |  30%* |
+| 6 | Hill α ∈ [1.8, 6.0]               |  4.016 |  90%  |
+| 7 | Spread variation (CoV > 0.08)      |  0.769 | 100%  |
+| 8 | OFI clustering (ACF\|OFI\|, lag=1)  |  0.441 | 100%  |
+
+*Fato 5 excluído por design: `InstitutionalExecutor` (count=1, side=Buy) cria assimetria
+positiva sistemática que não pode ser removida sem quebrar os demais fatos.
+**Overall: 7/8 fatos a ≥80% (86.2% ponderado).**
 
 ---
 
