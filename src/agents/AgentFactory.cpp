@@ -35,10 +35,14 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
     // Market makers — Bayesian: infer value from order flow, not from fundamental
     for (int i = 0; i < cfg_.market_makers.count; ++i) {
         MarketMakerAS::Params p;
-        p.gamma = sample(cfg_.market_makers.gamma_range, eng);
-        p.kappa = sample(cfg_.market_makers.k_range, eng);
-        p.sigma = sample(cfg_.market_makers.sigma_range, eng);
-        p.T     = cfg_.market_makers.T_horizon;
+        p.gamma        = sample(cfg_.market_makers.gamma_range, eng);
+        p.kappa        = sample(cfg_.market_makers.k_range, eng);
+        p.sigma        = sample(cfg_.market_makers.sigma_range, eng);
+        p.T            = cfg_.market_makers.T_horizon;
+        p.qty          = static_cast<Qty>(cfg_.market_makers.mm_qty);
+        p.beta_ofi     = cfg_.market_makers.beta_ofi;
+        p.adverse_sel  = cfg_.market_makers.adverse_sel;
+        p.belief_decay = cfg_.market_makers.belief_decay;
         agents.emplace_back(std::make_unique<MarketMakerAS>(
             alloc_id(), ticker_, rng_.for_consumer("MM_" + std::to_string(i)),
             p, RiskLimits{}, LatencyProfile{}, InformationProfile{}));
@@ -58,8 +62,9 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
     // Informed traders — Pareto-multiplied Kyle sizes for heavy-tailed informed trades
     for (int i = 0; i < cfg_.informed_traders.count; ++i) {
         InformedTraderKyle::Params p;
-        p.lambda_inv   = cfg_.informed_traders.lambda_inv;
-        p.pareto_alpha = cfg_.informed_traders.pareto_alpha;
+        p.lambda_inv      = cfg_.informed_traders.lambda_inv;
+        p.pareto_alpha    = cfg_.informed_traders.pareto_alpha;
+        p.max_order_size  = static_cast<Qty>(cfg_.informed_traders.max_order_size);
         InformationProfile ip;
         ip.sees_fundamental = true;
         agents.emplace_back(std::make_unique<InformedTraderKyle>(
@@ -132,6 +137,7 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
         NewsReactor::Params p;
         p.reaction_lag_mean = sample(cfg_.news_reactors.lag_range, eng);
         p.sensitivity       = sample(cfg_.news_reactors.sensitivity_range, eng);
+        p.base_qty          = static_cast<Qty>(cfg_.news_reactors.base_qty);
         agents.emplace_back(std::make_unique<NewsReactor>(
             alloc_id(), ticker_, rng_.for_consumer("NR_" + std::to_string(i)),
             p, bus_));

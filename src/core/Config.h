@@ -14,10 +14,14 @@ struct ParamRange {
 
 struct MarketMakerParams {
     int count = 3;
+    int mm_qty = 100;                              // shares per quote side
     ParamRange<double> gamma_range    = {0.05, 0.20};
     ParamRange<double> k_range        = {1.0,  4.0};
     ParamRange<double> sigma_range    = {0.01, 0.04};  // fractional vol per tick
     double T_horizon                  = 100.0;  // ticks
+    double beta_ofi                   = 0.35;   // Bayesian belief update speed from OFI
+    double adverse_sel                = 0.04;   // adverse selection spread multiplier
+    double belief_decay               = 0.05;   // reversion speed toward perceived mid
 };
 
 struct NoiseTraderParams {
@@ -28,10 +32,11 @@ struct NoiseTraderParams {
 };
 
 struct InformedTraderParams {
-    int count = 1;
+    int count = 2;
     double lambda_inv                 = 0.5;
     double pareto_alpha               = 1.5;  // Pareto tail exponent for order sizing
-    ParamRange<double> signal_lag_range = {0, 5};
+    int    max_order_size             = 100;  // raised from 50 to allow crash differentiation
+    ParamRange<double> signal_lag_range = {0, 3};
 };
 
 struct MomentumParams {
@@ -43,13 +48,13 @@ struct MomentumParams {
 };
 
 struct MeanReverterParams {
-    int count = 8;
+    int count = 0;
     ParamRange<double> entry_z_range  = {1.5, 3.0};
     ParamRange<int>    window_range   = {20,  60};
 };
 
 struct ValueInvestorParams {
-    int count = 2;
+    int count = 0;
     ParamRange<double> k_range        = {0.01, 0.05};
 };
 
@@ -64,14 +69,16 @@ struct InstitutionalParams {
 struct StopLossParams {
     int   count                       = 6;
     int64_t entry_price_ticks         = 10000; // reference price for seeded positions
-    ParamRange<double> trigger_range  = {0.02, 0.06};
-    ParamRange<int>    qty_range      = {10,  100};
+    ParamRange<double> trigger_range  = {0.04, 0.08};  // 4-8% drop: avoids noise false-triggers
+    ParamRange<int>    qty_range      = {10,   75};  // 6×75=450 < 600 MM depth: avoids bid depletion
 };
 
 struct NewsReactorParams {
     // lag_range = [0,1]: short lags so reactors fire within 1 tick of news.
-    // Larger lags create multi-tick directional order flow → positive return ACF (Fact 2 failure).
-    int count = 6;
+    // Each reactor fires once per tick for the full event duration (duration_ticks),
+    // creating sustained directional OFI that drives vol clustering (Facts 3 & 4).
+    int count = 8;
+    int base_qty = 50;                             // shares per reaction tick (8×50=400 < 600 MM depth)
     ParamRange<double> lag_range      = {0, 1};
     ParamRange<double> sensitivity_range = {0.5, 2.0};
 };
@@ -110,23 +117,24 @@ struct FundamentalConfig {
     // Regime switching — defaults match RegimeSwitchingProcess internal calibration
     double nu                   = 3.5;    // Student-t degrees of freedom for innovations
     bool   gaussian_innovations = false;  // if true, use N(0,1) instead of Student-t
-    double regime_sigma[3]      = {0.003, 0.010, 0.025};  // low_vol, high_vol, crash
+    double regime_sigma[3]      = {0.003, 0.010, 0.035};  // low_vol, high_vol, crash
     double regime_mu[3]         = {0.0,   0.0,   0.0};    // pure martingale in all regimes
-    // Transition matrix (row = from, col = to) — fast crash recovery (~1.5 ticks avg)
+    // Transition matrix (row = from, col = to)
+    // high_vol: avg 33 ticks (1/0.030); crash: avg 6.7 ticks (1/0.150)
     double regime_trans[3][3]   = {
         {0.990, 0.007, 0.003},
-        {0.050, 0.940, 0.010},
-        {0.350, 0.300, 0.350}
+        {0.020, 0.970, 0.010},
+        {0.050, 0.100, 0.850}
     };
 };
 
 // ── News process config ────────────────────────────────────────────────────
 
 struct NewsConfig {
-    double lambda               = 0.005;  // events per tick
+    double lambda               = 0.002;  // events per tick (reduced to limit return ACF)
     double impact_df            = 3.0;    // Student-t degrees of freedom for magnitude
     double impact_scale         = 0.02;   // scale of the t-distribution
-    int    duration_ticks       = 5;
+    int    duration_ticks       = 5;      // ticks of sustained reactor firing per event
     double dispersion           = 0.5;    // cross-agent heterogeneity
 };
 

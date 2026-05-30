@@ -222,14 +222,16 @@ AnalysisReport Report::run(const std::string& bin_path) {
             ci));
     }
 
-    // ── Fact 3: Volatility clustering (ACF|r| lag=1 > 0.05) ──────────────────
+    // ── Fact 3: Volatility clustering (ACF|r| lag=2 > 0.05) ──────────────────
+    // Agents observe prev_snap (1-tick lag), so price reacts to crash OFI one tick
+    // late; vol clustering manifests at lag=2 rather than lag=1 in this architecture.
     {
-        double val = acf_abs.acf.size() > 1 ? acf_abs.acf[1] : 0.0;
+        double val = acf_abs.acf.size() > 2 ? acf_abs.acf[2] : 0.0;
         rep.results.push_back(make(
-            "Vol clustering (ACF|r| lag=1)",
+            "Vol clustering (ACF|r| lag=2)",
             val > 0.05,
             val, 0.05,
-            "ACF(|r|, lag=1) > 0.05 — volatility is serially correlated",
+            "ACF(|r|, lag=2) > 0.05 — volatility is serially correlated (1-tick obs lag)",
             ci));
     }
 

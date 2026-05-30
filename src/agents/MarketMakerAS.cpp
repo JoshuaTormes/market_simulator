@@ -55,7 +55,8 @@ std::vector<Action> MarketMakerAS::on_market_data(const AgentSnapshot& snap) {
     Price ask_px = static_cast<Price>(std::ceil (reservation + spread_half));
     if (bid_px <= 0 || ask_px <= bid_px) return {};
 
-    // TTL = tick + 2: survive expire(now), then expire next tick after fresh quotes arrive.
+    // TTL = tick + 2: two generations of orders survive the expire step so the
+    // publisher always sees a populated book (expire removes tick-2 orders after publish).
     Tick ttl = snap.base.tick + 2;
 
     return {

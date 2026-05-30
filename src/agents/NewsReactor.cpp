@@ -17,12 +17,17 @@ NewsReactor::NewsReactor(AgentId id, const std::string& ticker,
             if (std::abs(perceived_impact) < 1e-6) return;
 
             double lag  = lag_dist_(rng_);
-            Tick fire   = ev.announce_tick + static_cast<Tick>(std::round(lag));
+            Tick start  = ev.announce_tick + static_cast<Tick>(std::round(lag));
             Side side   = (perceived_impact > 0.0) ? Side::Buy : Side::Sell;
             double scale = std::min(std::abs(perceived_impact) * static_cast<double>(p_.base_qty),
                                     static_cast<double>(rl_.max_position));
             Qty qty = std::max(Qty{1}, static_cast<Qty>(std::round(scale)));
-            queue_.push_back({ fire, side, qty });
+
+            // Fire once per tick for the full event duration — creates sustained
+            // directional OFI that drives vol clustering (Facts 3 & 4).
+            int n_ticks = std::max(1, static_cast<int>(std::round(ev.duration_ticks)));
+            for (int dt = 0; dt < n_ticks; ++dt)
+                queue_.push_back({ start + static_cast<Tick>(dt), side, qty });
         });
     }
 }
