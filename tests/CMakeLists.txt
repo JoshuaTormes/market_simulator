@@ -29,6 +29,7 @@ add_sim_test(test_eventbus       unit/test_eventbus.cpp)
 # Phase 1
 add_sim_test(test_orderbook      unit/test_orderbook.cpp)
 add_sim_test(test_matching       unit/test_matching.cpp)
+add_sim_test(test_cancel_all     unit/test_cancel_all.cpp)
 # Phase 2
 add_sim_test(test_ledger         unit/test_ledger.cpp)
 add_sim_test(test_clearing       unit/test_clearing.cpp)

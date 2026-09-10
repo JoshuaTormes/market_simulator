@@ -23,6 +23,10 @@ protected:
     // Helper: build a SubmitOrder wrapped in Action.
     Action submit(Side side, OrderType type, Price price, Qty qty, Tick ttl = 0) const;
 
+    // Helper: wipe this agent's resting book. Emit it before this tick's
+    // quotes so the cancel lands first (lower seq at the same arrival tick).
+    Action cancel_all() const;
+
     const AgentId          id_;
     const std::string      ticker_;
     std::mt19937_64        rng_;

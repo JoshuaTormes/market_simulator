@@ -5,6 +5,7 @@
 #include "core/Types.h"
 #include <map>
 #include <list>
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include <functional>
@@ -43,6 +44,13 @@ public:
 
     // Cancel resting order by id. Returns true if found and removed.
     bool cancel(OrderId id);
+
+    // Cancel every resting order owned by `agent`. Returns how many were removed.
+    // O(k) in the agent's own order count, via the per-agent index.
+    size_t cancel_all(AgentId agent);
+
+    // Number of resting orders owned by `agent` (diagnostics and tests).
+    size_t order_count(AgentId agent) const;
 
     // Modify price/qty of a resting order.
     // Changing price resets time priority (remove + re-insert).
@@ -94,7 +102,16 @@ private:
     BidMap bids_;
     AskMap asks_;
     std::unordered_map<OrderId, IndexEntry> index_;
+    // Owner index, kept in lockstep with index_ by index_put/index_drop.
+    // std::set (not unordered) so cancel_all visits ids in a fixed order and
+    // the simulation stays bit-exact across runs.
+    std::unordered_map<AgentId, std::set<OrderId>> by_agent_;
     FeeModel fee_model_;
+
+    // The only two places allowed to touch index_/by_agent_ membership.
+    void index_put(const OrderNode& node, bool is_bid, Price price,
+                   PriceLevel::iterator level_it);
+    void index_drop(OrderId id);
 
     // Fill maker from its resting position (qty_remaining reduced in-place).
     // Returns the trade and cleans up the maker node if fully filled.

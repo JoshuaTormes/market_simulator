@@ -196,6 +196,8 @@ void SimulationLoop::submit_filtered(const std::vector<FilteredAction>& fas, Tic
             } else if constexpr (std::is_same_v<T, ModifyOrder>) {
                 engine_.modify(act.order_id, a->id(),
                                act.new_price, act.new_qty, now, lp);
+            } else if constexpr (std::is_same_v<T, CancelAll>) {
+                engine_.cancel_all(a->id(), now, lp);
             }
         }, fa.action);
     }

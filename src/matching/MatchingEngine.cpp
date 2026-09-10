@@ -42,6 +42,12 @@ void MatchingEngine::cancel(OrderId id, AgentId agent, Tick now, const LatencyPr
     queue_.push(CancelOrderEvent{id, agent, arrival, seq});
 }
 
+void MatchingEngine::cancel_all(AgentId agent, Tick now, const LatencyProfile& lp) {
+    SeqNo seq    = next_seq_++;
+    Tick arrival = compute_arrival(now, lp);
+    queue_.push(CancelAllEvent{agent, arrival, seq});
+}
+
 void MatchingEngine::modify(OrderId id, AgentId agent, Price new_price, Qty new_qty,
                              Tick now, const LatencyProfile& lp) {
     SeqNo seq    = next_seq_++;
@@ -93,4 +99,8 @@ void MatchingEngine::apply_event(const CancelOrderEvent& e, const TradeCallback&
 
 void MatchingEngine::apply_event(const ModifyOrderEvent& e, const TradeCallback&) {
     book_.modify(e.order_id, e.new_price, e.new_qty);
+}
+
+void MatchingEngine::apply_event(const CancelAllEvent& e, const TradeCallback&) {
+    book_.cancel_all(e.agent_id);
 }

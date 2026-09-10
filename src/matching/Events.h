@@ -28,7 +28,17 @@ struct ModifyOrderEvent {
     SeqNo   seq;
 };
 
-using MatchingEvent = std::variant<SubmitOrderEvent, CancelOrderEvent, ModifyOrderEvent>;
+// Mass cancel: drops every resting order owned by agent_id.  Queued like any
+// other event, so it obeys the agent's latency and its seq places it before
+// the SubmitOrders the same agent emitted after it on the same tick.
+struct CancelAllEvent {
+    AgentId agent_id;
+    Tick    arrival_tick;
+    SeqNo   seq;
+};
+
+using MatchingEvent = std::variant<SubmitOrderEvent, CancelOrderEvent,
+                                   ModifyOrderEvent, CancelAllEvent>;
 
 // Comparator: process earlier ticks first; break ties by seq_no.
 struct EventComparator {

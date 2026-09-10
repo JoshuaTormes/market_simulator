@@ -15,6 +15,28 @@ void OrderBookV2::prune_empty_ask(AskMap::iterator it) {
     if (it->second.empty()) asks_.erase(it);
 }
 
+// index_ and by_agent_ must never disagree: a stale owner entry would make
+// cancel_all() try to remove an order that is already gone.  Every insertion
+// and removal goes through these two.
+void OrderBookV2::index_put(const OrderNode& node, bool is_bid, Price price,
+                            PriceLevel::iterator level_it) {
+    if (is_bid) index_[node.id] = IndexEntry{true, bids_.find(price), {}, level_it};
+    else        index_[node.id] = IndexEntry{false, {}, asks_.find(price), level_it};
+    by_agent_[node.agent_id].insert(node.id);
+}
+
+void OrderBookV2::index_drop(OrderId id) {
+    auto it = index_.find(id);
+    if (it == index_.end()) return;
+    const AgentId owner = it->second.level_it->agent_id;
+    index_.erase(it);
+    auto ait = by_agent_.find(owner);
+    if (ait != by_agent_.end()) {
+        ait->second.erase(id);
+        if (ait->second.empty()) by_agent_.erase(ait);
+    }
+}
+
 Trade OrderBookV2::fill_pair(
     const Order& taker, OrderNode& maker,
     Price exec_price, Qty exec_qty,
@@ -71,11 +93,11 @@ std::optional<OrderId> OrderBookV2::add_limit(const Order& order) {
     if (order.side == Side::Buy) {
         auto& level = bids_[order.price];
         auto  it    = level.insert(level.end(), node);
-        index_[order.id] = IndexEntry{true, bids_.find(order.price), {}, it};
+        index_put(node, true, order.price, it);
     } else {
         auto& level = asks_[order.price];
         auto  it    = level.insert(level.end(), node);
-        index_[order.id] = IndexEntry{false, {}, asks_.find(order.price), it};
+        index_put(node, false, order.price, it);
     }
 
     return order.id;
@@ -102,8 +124,8 @@ std::vector<Trade> OrderBookV2::match(Tick now) {
 
         // Self-trade prevention: CancelBoth (default for resting-vs-resting).
         if (bid_node.agent_id == ask_node.agent_id) {
-            index_.erase(bid_node.id);
-            index_.erase(ask_node.id);
+            index_drop(bid_node.id);
+            index_drop(ask_node.id);
             bid_level.pop_front();
             ask_level.pop_front();
             prune_empty_bid(bid_lvl_it);
@@ -144,12 +166,12 @@ std::vector<Trade> OrderBookV2::match(Tick now) {
 
         // Clean up fully filled nodes (preserve partial-fill position by NOT re-inserting).
         if (bid_node.qty_remaining == 0) {
-            index_.erase(bid_node.id);
+            index_drop(bid_node.id);
             bid_level.pop_front();
             prune_empty_bid(bid_lvl_it);
         }
         if (ask_node.qty_remaining == 0) {
-            index_.erase(ask_node.id);
+            index_drop(ask_node.id);
             ask_level.pop_front();
             prune_empty_ask(ask_lvl_it);
         }
@@ -193,7 +215,7 @@ std::vector<Trade> OrderBookV2::execute_aggressive(Order order, Tick now) {
                 if (maker.agent_id == order.agent_id) {
                     // Self-trade: skip this maker (CancelNewest = skip incoming partial).
                     // For a market/IOC/FOK we just skip this level node.
-                    index_.erase(maker.id);
+                    index_drop(maker.id);
                     level.pop_front();
                     continue;
                 }
@@ -220,7 +242,7 @@ std::vector<Trade> OrderBookV2::execute_aggressive(Order order, Tick now) {
                 trades.push_back(tr);
 
                 if (maker.qty_remaining == 0) {
-                    index_.erase(maker.id);
+                    index_drop(maker.id);
                     level.pop_front();
                 }
             }
@@ -245,7 +267,10 @@ bool OrderBookV2::cancel(OrderId id) {
     auto it = index_.find(id);
     if (it == index_.end()) return false;
 
-    IndexEntry& entry = it->second;
+    IndexEntry entry = it->second;
+    // Drop from the indices first: index_drop reads the owner off the node,
+    // which the list erase below invalidates.
+    index_drop(id);
 
     if (entry.is_bid) {
         entry.bid_map_it->second.erase(entry.level_it);
@@ -255,8 +280,24 @@ bool OrderBookV2::cancel(OrderId id) {
         prune_empty_ask(entry.ask_map_it);
     }
 
-    index_.erase(it);
     return true;
+}
+
+size_t OrderBookV2::cancel_all(AgentId agent) {
+    auto it = by_agent_.find(agent);
+    if (it == by_agent_.end()) return 0;
+
+    // Copy the ids: cancel() mutates by_agent_ as it goes.
+    const std::vector<OrderId> ids(it->second.begin(), it->second.end());
+    size_t removed = 0;
+    for (OrderId id : ids)
+        if (cancel(id)) ++removed;
+    return removed;
+}
+
+size_t OrderBookV2::order_count(AgentId agent) const {
+    auto it = by_agent_.find(agent);
+    return it == by_agent_.end() ? 0 : it->second.size();
 }
 
 // ── Modify ────────────────────────────────────────────────────────────────

@@ -30,6 +30,9 @@ public:
     // Submit a cancel (produces CancelOrderEvent with arrival delay).
     void cancel(OrderId id, AgentId agent, Tick now, const LatencyProfile& latency);
 
+    // Queue a mass cancel of everything `agent` has resting.
+    void cancel_all(AgentId agent, Tick now, const LatencyProfile& latency);
+
     // Submit a modify.
     void modify(OrderId id, AgentId agent, Price new_price, Qty new_qty,
                 Tick now, const LatencyProfile& latency);
@@ -64,4 +67,5 @@ private:
     void apply_event(const SubmitOrderEvent& e, const TradeCallback& cb);
     void apply_event(const CancelOrderEvent& e, const TradeCallback& cb);
     void apply_event(const ModifyOrderEvent& e, const TradeCallback& cb);
+    void apply_event(const CancelAllEvent& e, const TradeCallback& cb);
 };

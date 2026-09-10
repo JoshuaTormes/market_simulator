@@ -16,3 +16,7 @@ AgentBase::AgentBase(AgentId id, std::string ticker,
 Action AgentBase::submit(Side side, OrderType type, Price price, Qty qty, Tick ttl) const {
     return SubmitOrder{ side, type, price, qty, ticker_, ttl };
 }
+
+Action AgentBase::cancel_all() const {
+    return CancelAll{ ticker_ };
+}

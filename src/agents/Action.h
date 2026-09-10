@@ -28,4 +28,12 @@ struct ModifyOrder {
     std::string ticker;
 };
 
-using Action = std::variant<SubmitOrder, CancelOrder, ModifyOrder>;
+// Cancel every resting order the agent owns, in one event.  A market maker
+// that requotes each tick needs this: without it the only way to clear stale
+// quotes is to remember every id and emit one CancelOrder per order, which
+// silently leaves ghost liquidity behind whenever the bookkeeping drifts.
+struct CancelAll {
+    std::string ticker;
+};
+
+using Action = std::variant<SubmitOrder, CancelOrder, ModifyOrder, CancelAll>;
