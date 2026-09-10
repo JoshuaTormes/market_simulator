@@ -1,4 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
+
+# ── Toolchain defaults (must come before project()) ────────────────────────
+# On macOS, default to the Apple clang toolchain. A Homebrew GCC picked up by
+# accident links against an SDK that may not exist ("ld: library 'System' not
+# found"). An explicit -DCMAKE_CXX_COMPILER=... on the command line still wins.
+if(APPLE)
+    if(NOT DEFINED CMAKE_C_COMPILER AND EXISTS /usr/bin/clang)
+        set(CMAKE_C_COMPILER /usr/bin/clang)
+    endif()
+    if(NOT DEFINED CMAKE_CXX_COMPILER AND EXISTS /usr/bin/clang++)
+        set(CMAKE_CXX_COMPILER /usr/bin/clang++)
+    endif()
+endif()
+
 project(simulador LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -27,9 +41,29 @@ if(SIM_TSAN)
     set(SIM_SANITIZER_FLAGS -fsanitize=thread)
 endif()
 
-# ── Third-party UI libs (unchanged from original) ─────────────────────────
-find_package(SFML 2.5 COMPONENTS graphics window system REQUIRED)
+# ── Third-party UI libs (optional) ────────────────────────────────────────
+# SFML 2.x is required only for the `simulador` GUI target. SFML 3 is not API
+# compatible, so on Homebrew we hint the keg-only sfml@2 prefix.
+option(SIM_BUILD_UI "Build the SFML/ImGui GUI target (simulador)" ON)
 
+if(EXISTS /opt/homebrew/opt/sfml@2)
+    list(APPEND CMAKE_PREFIX_PATH /opt/homebrew/opt/sfml@2)
+endif()
+
+set(SIM_UI_ENABLED OFF)
+if(SIM_BUILD_UI)
+    find_package(SFML 2.5 COMPONENTS graphics window system QUIET)
+    if(SFML_FOUND)
+        set(SIM_UI_ENABLED ON)
+    else()
+        message(STATUS "SFML 2.5 not found — skipping GUI target `simulador`. "
+                       "Install with `brew install sfml@2` or configure with -DSIM_BUILD_UI=OFF.")
+    endif()
+else()
+    message(STATUS "SIM_BUILD_UI=OFF — skipping GUI target `simulador`.")
+endif()
+
+if(SIM_UI_ENABLED)
 add_library(imgui STATIC
     external/imgui/imgui.cpp
     external/imgui/imgui_draw.cpp
@@ -53,6 +87,7 @@ add_library(imgui_sfml STATIC
 target_include_directories(imgui_sfml PUBLIC external/imgui external/imgui-sfml)
 target_link_libraries(imgui_sfml PUBLIC imgui sfml-graphics sfml-window sfml-system)
 target_compile_options(imgui_sfml PRIVATE -w)
+endif()  # SIM_UI_ENABLED
 
 # ── sim_core: all simulation source (no UI, no main) ──────────────────────
 # This is what tests link against.
@@ -114,7 +149,8 @@ target_compile_options(sim_core PRIVATE
 )
 target_link_options(sim_core INTERFACE ${SIM_SANITIZER_FLAGS})
 
-# ── simulador executable ───────────────────────────────────────────────────
+# ── simulador executable (GUI, optional) ──────────────────────────────────
+if(SIM_UI_ENABLED)
 add_executable(simulador
     src/main.cpp
     src/visual/VisualApp.cpp
@@ -146,6 +182,7 @@ target_link_options(simulador PRIVATE ${SIM_SANITIZER_FLAGS})
 if(APPLE)
     target_link_libraries(simulador PRIVATE "-framework OpenGL" "-framework Cocoa")
 endif()
+endif()  # SIM_UI_ENABLED
 
 # ── analysis_csv_export: offline CSV export tool (no UI) ──────────────────
 add_executable(analysis_csv_export src/tools/analysis_csv_export.cpp)
