@@ -54,6 +54,10 @@ int main(int argc, char** argv) {
     Clearing          clearing(ledger, cfg.ticker);
     // Publisher reads from the matching engine's internal book (the canonical book state).
     MarketDataPublisher publisher(matching.book());
+    // Bootstrap carry-forward: the makers no longer see the fundamental, so the
+    // first mid has to come from config.  Without this the maker reads mid = 0,
+    // quotes nothing, the book never opens and every panel stays empty.
+    publisher.set_initial_mid(static_cast<Price>(cfg.initial_price_ticks));
 
     // ── Fundamental value + news ─────────────────────────────────────────────
     auto fundamental_ptr = make_fundamental_process(cfg.fundamental, cfg.time,
