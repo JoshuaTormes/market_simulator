@@ -16,7 +16,9 @@
 #include "agents/AgentRunner.h"
 #include "risk/RiskGate.h"
 #include "orderbook/Order.h"
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <vector>
 #include <string>
 
@@ -154,4 +156,61 @@ TEST_CASE("SimulationLoop smoke: deterministic — same seed same result", "[smo
     Price p1 = run_sim(7);
     Price p2 = run_sim(7);
     CHECK(p1 == p2);
+}
+
+TEST_CASE("SimulationLoop: max_ticks == 0 runs until stop()", "[smoke][unbounded]") {
+    // A live UI session has no end tick.  The loop must keep going past any
+    // fixed bound and end only when stop() is requested.
+    const std::string TICKER = "TEST";
+    RngService rng(11);
+    EventBus   bus;
+
+    MatchingEngine      matching(TICKER, FeeModel{}, STPMode::CancelBoth, &rng);
+    PositionLedger      ledger;
+    Clearing            clearing(ledger, TICKER);
+    MarketDataPublisher publisher(matching.book());
+    publisher.set_initial_mid(10'000);
+
+    GBMProcess fundamental(GBMProcess::Config{}, rng.for_consumer("fundamental"));
+    PoissonNewsProcess news(PoissonNewsProcess::Config{}, rng.for_consumer("news"), &bus);
+
+    PopulationConfig pop;
+    pop.market_makers.count    = 1;
+    pop.noise_traders.count    = 2;
+    pop.informed_traders.count = 0;
+    pop.momentum_traders.count = 0;
+    pop.mean_reverters.count   = 0;
+    pop.value_investors.count  = 0;
+    pop.institutionals.count   = 0;
+    pop.stop_loss.count        = 0;
+    pop.news_reactors.count    = 0;
+
+    AgentFactory factory(pop, rng, TICKER, &bus, &ledger);
+    auto owned = factory.create_all();
+    std::vector<IAgent*> ptrs;
+    for (auto& a : owned) ptrs.push_back(a.get());
+
+    AgentRunner runner(ptrs, 11u, &ledger, TICKER);
+    RiskGate    risk_gate(ledger, TICKER);
+    Logger      logger;
+
+    SimulationLoop::Config scfg;
+    scfg.max_ticks = 0;              // unbounded
+    scfg.ticker    = TICKER;
+    SnapshotBuffer snap_buf;
+    SimulationLoop sim(scfg, fundamental, news, runner, risk_gate,
+                       matching, clearing, ledger, publisher, logger);
+
+    std::thread th([&] { sim.run(snap_buf); });
+
+    // Wait until the run is clearly past the old default bound, then stop it.
+    const Tick target = 1000;
+    for (int i = 0; i < 200 && sim.current_tick() < target; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    const Tick reached = sim.current_tick();
+    sim.request_stop();
+    th.join();
+
+    CHECK(reached >= target);
 }

@@ -40,7 +40,10 @@ SimulationLoop::SimulationLoop(
 {}
 
 void SimulationLoop::run(SnapshotBuffer& snap_buf) {
-    for (Tick t = 0; t < cfg_.max_ticks; ++t) {
+    // max_ticks == 0 means "run until stop()".  A live session has no natural
+    // end tick; the UI sets this and ends the run by closing the window.
+    const bool unbounded = (cfg_.max_ticks == 0);
+    for (Tick t = 0; unbounded || t < cfg_.max_ticks; ++t) {
         if (stop_.load(std::memory_order_acquire)) break;
 
         // Pause loop: spin-wait, but honour step_count_ for single-step mode.

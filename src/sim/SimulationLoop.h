@@ -25,7 +25,7 @@
 class SimulationLoop {
 public:
     struct Config {
-        Tick        max_ticks        = 100'000;
+        Tick        max_ticks        = 100'000;   // 0 = unbounded, until stop()
         double      dt               = 1.0;   // time units per tick
         int         publish_interval = 1;     // snapshot every N ticks
         std::string ticker           = "MAIN";
@@ -45,7 +45,8 @@ public:
         Logger&                    logger
     );
 
-    // Run until max_ticks or stop() is called. Publishes to snap_buf.
+    // Run until max_ticks or stop() is called; max_ticks == 0 runs until
+    // stop(). Publishes to snap_buf.
     void run(SnapshotBuffer& snap_buf);
 
     void request_stop() { stop_.store(true,   std::memory_order_release); }

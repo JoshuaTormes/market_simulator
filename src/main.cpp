@@ -26,6 +26,9 @@
 
 int main(int argc, char** argv) {
     SimulationConfig cfg;
+    // The UI is a live session: it runs until the window is closed.  Pass
+    // --duration N for a bounded run.
+    cfg.max_ticks = 0;
 
     for (int i = 1; i < argc - 1; ++i) {
         std::string key = argv[i];
