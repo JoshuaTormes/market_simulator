@@ -1,112 +1,134 @@
 #include <catch_amalgamated.hpp>
 #include "agents/MarketMakerAS.h"
 #include "marketdata/AgentSnapshot.h"
+#include "core/EventBus.h"
 #include "core/RngService.h"
+#include "economics/NewsEvent.h"
 #include <cmath>
 
-static AgentSnapshot make_snap(Price mid, Price spread, Tick tick = 1,
-                               double ofi = 0.0, double own_inv = 0.0) {
+// Glosten-Milgrom belief dynamics: order flow, executed prices and public
+// announcements move the maker's private mid.
+
+static AgentSnapshot make_snap(Price mid, Tick tick = 1,
+                               double ofi = 0.0, double own_inv = 0.0,
+                               Price last = 0) {
     AgentSnapshot as;
     as.base.tick             = tick;
     as.base.mid_price        = mid;
-    as.base.spread           = spread;
-    as.base.last_trade_price = mid;
-    as.base.realized_vol[0]  = 0.01;
-    as.base.realized_vol[1]  = 0.01;
-    as.base.realized_vol[2]  = 0.01;
+    as.base.spread           = 2;
+    as.base.last_trade_price = last > 0 ? last : mid;
+    as.base.realized_vol[0]  = 0.0;
     as.base.ofi_tick         = ofi;
     as.perceived_mid         = mid;
-    as.perceived_last        = mid;
+    as.perceived_last        = last > 0 ? last : mid;
     as.own_inventory         = own_inv;
     return as;
 }
 
-TEST_CASE("MarketMakerAS Bayesian: long inventory shifts quotes down", "[mm_bayesian]") {
-    // A-S: reservation = belief - q*γ*σ²*(T-t). With q > 0 the reservation drops,
-    // pushing both bid and ask below the neutral (q=0) quotes.
-    RngService rng(42);
-    MarketMakerAS::Params p;
-    p.gamma = 0.1; p.kappa = 1.5; p.sigma = 0.02; p.T = 100.0; p.qty = 10;
-
-    MarketMakerAS mm_flat(1, "T", rng.for_consumer("mm_flat"), p);
-    MarketMakerAS mm_long(2, "T", rng.for_consumer("mm_long"), p);
-
-    auto a_flat = mm_flat.on_market_data(make_snap(10000, 2, 1, 0.0,  0.0));
-    auto a_long = mm_long.on_market_data(make_snap(10000, 2, 1, 0.0, 50.0));
-
-    auto bid_flat = std::get<SubmitOrder>(a_flat[0]).price;
-    auto ask_flat = std::get<SubmitOrder>(a_flat[1]).price;
-    auto bid_long = std::get<SubmitOrder>(a_long[0]).price;
-    auto ask_long = std::get<SubmitOrder>(a_long[1]).price;
-
-    // Long inventory → reservation price drops → both quotes shift down.
-    CHECK(bid_long <= bid_flat);
-    CHECK(ask_long <= ask_flat);
+static const SubmitOrder& quote(const std::vector<Action>& acts, Side side) {
+    for (const auto& a : acts)
+        if (const auto* so = std::get_if<SubmitOrder>(&a))
+            if (so->side == side) return *so;
+    throw std::runtime_error("no quote on that side");
 }
 
-TEST_CASE("MarketMakerAS Bayesian: toxic flow widens spread", "[mm_bayesian]") {
-    // adverse_sel * |ofi_tick| is added to half-spread.
-    // Strong buy-side OFI (toxic for MM selling) should widen the spread.
+TEST_CASE("MarketMakerAS: long inventory skews both quotes down", "[mm_bayesian]") {
     RngService rng(42);
     MarketMakerAS::Params p;
-    p.gamma = 0.1; p.kappa = 1.5; p.sigma = 0.02; p.T = 100.0; p.qty = 10;
-    p.adverse_sel = 0.05;
+    p.inventory_skew_ticks = 4.0;
+    p.q_soft               = 300.0;
 
-    MarketMakerAS mm_clean(1, "T", rng.for_consumer("mm_clean"), p);
-    MarketMakerAS mm_toxic(2, "T", rng.for_consumer("mm_toxic"), p);
+    MarketMakerAS flat(1, "T", rng.for_consumer("flat"), p);
+    MarketMakerAS lng (2, "T", rng.for_consumer("long"), p);
 
-    auto a_clean = mm_clean.on_market_data(make_snap(10000, 2, 1, 0.0,   0.0));
-    auto a_toxic = mm_toxic.on_market_data(make_snap(10000, 2, 1, 100.0, 0.0));
+    auto a0 = flat.on_market_data(make_snap(10000, 1, 0.0,   0.0));
+    auto a1 = lng .on_market_data(make_snap(10000, 1, 0.0, 300.0));
 
-    Price spread_clean = std::get<SubmitOrder>(a_clean[1]).price
-                       - std::get<SubmitOrder>(a_clean[0]).price;
-    Price spread_toxic = std::get<SubmitOrder>(a_toxic[1]).price
-                       - std::get<SubmitOrder>(a_toxic[0]).price;
-
-    CHECK(spread_toxic >= spread_clean);
+    // At |q| = q_soft the reservation moves a full inventory_skew_ticks down.
+    CHECK(quote(a1, Side::Sell).price < quote(a0, Side::Sell).price);
+    CHECK(quote(a0, Side::Sell).price - quote(a1, Side::Sell).price
+          == Catch::Approx(4.0).margin(1.0));
 }
 
-TEST_CASE("MarketMakerAS Bayesian: buy OFI raises belief and quotes", "[mm_bayesian]") {
-    // beta_ofi > 0: persistent buy pressure pushes belief up, raising reservation price.
-    // After several ticks of positive OFI, ask price should exceed the no-OFI case.
+TEST_CASE("MarketMakerAS: signed flow moves the belief", "[mm_bayesian]") {
     RngService rng(42);
     MarketMakerAS::Params p;
-    p.gamma = 0.1; p.kappa = 1.5; p.sigma = 0.02; p.T = 100.0; p.qty = 5;
-    p.beta_ofi = 0.5; p.belief_decay = 0.001; p.adverse_sel = 0.0;
+    p.lambda_kyle               = 0.02;
+    p.belief_decay              = 0.0;   // no pull back to the tape
+    p.adverse_sel_ticks_per_lot = 0.0;   // isolate the belief effect
 
-    MarketMakerAS mm_buy(1, "T", rng.for_consumer("mm_buy"), p);
-    MarketMakerAS mm_neu(2, "T", rng.for_consumer("mm_neu"), p);
+    MarketMakerAS mm(1, "T", rng.for_consumer("mm"), p);
+    mm.on_market_data(make_snap(10000));
+    const double b0 = mm.belief();
 
-    // Warm up with 5 ticks of buy pressure vs. neutral OFI.
-    Price mid = 10000;
-    Price last_ask_buy = 0, last_ask_neu = 0;
-    for (int t = 1; t <= 5; ++t) {
-        auto ab = mm_buy.on_market_data(make_snap(mid, 2, t, 200.0, 0.0));
-        auto an = mm_neu.on_market_data(make_snap(mid, 2, t,   0.0, 0.0));
-        if (!ab.empty()) last_ask_buy = std::get<SubmitOrder>(ab[1]).price;
-        if (!an.empty()) last_ask_neu = std::get<SubmitOrder>(an[1]).price;
-    }
+    // 10 ticks of 200 lots of buy pressure → +0.02·200·10 = +40 ticks.
+    for (Tick t = 2; t <= 11; ++t)
+        mm.on_market_data(make_snap(10000, t, 200.0));
 
-    CHECK(last_ask_buy >= last_ask_neu);
+    CHECK(mm.belief() - b0 == Catch::Approx(40.0).margin(0.5));
+
+    MarketMakerAS sell(2, "T", rng.for_consumer("sell"), p);
+    sell.on_market_data(make_snap(10000));
+    for (Tick t = 2; t <= 11; ++t)
+        sell.on_market_data(make_snap(10000, t, -200.0));
+    CHECK(sell.belief() < b0);
 }
 
-TEST_CASE("MarketMakerAS Bayesian: own_inventory filled from snapshot", "[mm_bayesian]") {
-    // Sanity: the snapshot's own_inventory field is the mechanism through which
-    // AgentRunner wires the real ledger position. Verify the MM reads it correctly
-    // by checking that a large long position produces a lower mid-price quote.
+TEST_CASE("MarketMakerAS: belief is pulled toward the executed price", "[mm_bayesian]") {
     RngService rng(42);
     MarketMakerAS::Params p;
-    p.gamma = 0.1; p.kappa = 1.5; p.sigma = 0.02; p.T = 100.0; p.qty = 10;
+    p.lambda_kyle  = 0.0;
+    p.belief_decay = 0.5;
 
-    Price mid = 10000;
-    MarketMakerAS mm_a(1, "T", rng.for_consumer("a"), p);
-    MarketMakerAS mm_b(2, "T", rng.for_consumer("b"), p);
+    MarketMakerAS mm(1, "T", rng.for_consumer("mm"), p);
+    mm.on_market_data(make_snap(10000));
+    CHECK(mm.belief() == Catch::Approx(10000.0));
 
-    auto aa = mm_a.on_market_data(make_snap(mid, 2, 1, 0.0,   0.0));
-    auto ab = mm_b.on_market_data(make_snap(mid, 2, 1, 0.0, 200.0));
+    // Trades printing 20 ticks above the belief drag it halfway each tick.
+    mm.on_market_data(make_snap(10000, 2, 0.0, 0.0, /*last=*/10020));
+    CHECK(mm.belief() == Catch::Approx(10010.0));
+    mm.on_market_data(make_snap(10000, 3, 0.0, 0.0, /*last=*/10020));
+    CHECK(mm.belief() == Catch::Approx(10015.0));
+}
 
-    Price mid_a = (std::get<SubmitOrder>(aa[0]).price + std::get<SubmitOrder>(aa[1]).price) / 2;
-    Price mid_b = (std::get<SubmitOrder>(ab[0]).price + std::get<SubmitOrder>(ab[1]).price) / 2;
+TEST_CASE("MarketMakerAS: a public announcement reprices the belief", "[mm_bayesian]") {
+    // News is public.  A maker that ignores it stands still with stale quotes
+    // and is picked off by whoever traded on the announcement.
+    RngService rng(42);
+    EventBus bus;
+    MarketMakerAS::Params p;
+    p.lambda_kyle  = 0.0;
+    p.belief_decay = 0.0;
 
-    CHECK(mid_b <= mid_a);
+    MarketMakerAS mm(1, "T", rng.for_consumer("mm"), p,
+                     RiskLimits{}, LatencyProfile{}, InformationProfile{}, &bus);
+    mm.on_market_data(make_snap(10000));
+    REQUIRE(mm.belief() == Catch::Approx(10000.0));
+
+    NewsEvent ev;
+    ev.announce_tick     = 2;
+    ev.ticker            = "T";
+    ev.impact_log_return = 0.01;      // +1%
+    bus.publish(ev);
+
+    auto acts = mm.on_market_data(make_snap(10000, 2));
+    CHECK(mm.belief() == Catch::Approx(10000.0 * std::exp(0.01)).epsilon(1e-9));
+    // And it quotes there, above the stale observable mid.
+    CHECK(quote(acts, Side::Buy).price > 10000);
+}
+
+TEST_CASE("MarketMakerAS: belief stays within a band of the observable mid",
+          "[mm_bayesian]") {
+    // Unbounded flow must not walk the belief to a nonsensical level.
+    RngService rng(42);
+    MarketMakerAS::Params p;
+    p.lambda_kyle  = 0.05;
+    p.belief_decay = 0.0;
+
+    MarketMakerAS mm(1, "T", rng.for_consumer("mm"), p);
+    for (Tick t = 1; t <= 5000; ++t)
+        mm.on_market_data(make_snap(10000, t, 500.0));
+
+    CHECK(mm.belief() <= 11000.0);
+    CHECK(mm.belief() >= 10000.0);
 }

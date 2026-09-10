@@ -1,66 +1,91 @@
-// Avellaneda & Stoikov (2008) + Glosten-Milgrom (1985) Bayesian belief update from OFI.
-// r = μ̂ - q·γ·σ²·(T-t),  δ = γ·σ²·(T-t) + (2/γ)·ln(1+γ/κ) + adverse_sel·|ofi_tick|
+// reservation = belief - inventory_skew_ticks · (q / q_soft)
+// half        = half_spread_min_ticks + vol_mult · sigma_ticks
+//               + adverse_sel_ticks_per_lot · |OFI_tick|
+// size(side that grows |q|) = qty · max(0, 1 - |q| / q_soft)
 #include "MarketMakerAS.h"
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 
 MarketMakerAS::MarketMakerAS(AgentId id, const std::string& ticker,
                              std::mt19937_64 rng, Params p,
-                             RiskLimits rl, LatencyProfile lp, InformationProfile ip)
+                             RiskLimits rl, LatencyProfile lp,
+                             InformationProfile ip, EventBus* bus)
     : AgentBase(id, ticker, std::move(rng), rl, lp, ip)
     , p_(p)
-{}
+{
+    if (bus) {
+        bus->subscribe<NewsEvent>([this](const NewsEvent& ev) {
+            // A public announcement is public: the maker reprices immediately
+            // rather than waiting to be picked off by whoever read it first.
+            pending_news_ += ev.impact_log_return;
+        });
+    }
+}
 
 std::vector<Action> MarketMakerAS::on_market_data(const AgentSnapshot& snap) {
-    if (snap.base.spread < 0) return {};  // invalid book
-
-    double mid = static_cast<double>(snap.perceived_mid);
+    const double mid = static_cast<double>(snap.perceived_mid);
     if (mid <= 0.0) return {};
 
     if (first_tick_) {
-        birth_tick_ = snap.base.tick;
         belief_     = mid;
         first_tick_ = false;
     }
 
-    // Glosten-Milgrom: belief reverts toward perceived mid and shifts with OFI signal.
-    // buy pressure (ofi_tick > 0) → raise estimate; sell pressure → lower estimate.
-    double ofi = snap.base.ofi_tick;
-    belief_ = (1.0 - p_.belief_decay) * belief_
-            + p_.belief_decay * mid
-            + p_.beta_ofi * ofi;
+    // ── Belief update (Glosten-Milgrom) ──────────────────────────────────
+    if (pending_news_ != 0.0) {
+        belief_ *= std::exp(pending_news_);
+        pending_news_ = 0.0;
+    }
 
-    double elapsed     = static_cast<double>(snap.base.tick - birth_tick_);
-    double remaining_T = std::max(1.0, p_.T - elapsed);
+    const double ofi = snap.base.ofi_tick;
+    belief_ += p_.lambda_kyle * ofi;
 
-    // Real inventory from ledger (via AgentRunner → AgentSnapshot::own_inventory).
-    double q = snap.own_inventory;
+    const double last = static_cast<double>(snap.perceived_last);
+    if (last > 0.0)
+        belief_ += p_.belief_decay * (last - belief_);
 
-    // A-S reservation price around private belief.
-    double reservation = belief_ - q * p_.gamma * p_.sigma * p_.sigma * remaining_T;
+    // Belief is a price: an unbounded random walk in the belief would let the
+    // maker quote a nonsensical level after a long one-sided stretch, so keep
+    // it within a wide band of the observable mid.
+    const double band = std::max(50.0, 0.10 * mid);
+    belief_ = std::clamp(belief_, mid - band, mid + band);
 
-    // A-S half-spread + adverse selection term: widens when order flow is toxic.
-    double spread_half = 0.5 * (p_.gamma * p_.sigma * p_.sigma * remaining_T
-                                + (2.0 / p_.gamma) * std::log(1.0 + p_.gamma / p_.kappa))
-                       + p_.adverse_sel * std::abs(ofi);
+    // ── Quote geometry, in ticks ──────────────────────────────────────────
+    const double rv          = std::max(snap.base.realized_vol[0], p_.sigma_tick_floor);
+    const double sigma_ticks = rv * mid;
+    const double half = p_.half_spread_min_ticks
+                      + p_.vol_mult * sigma_ticks
+                      + p_.adverse_sel_ticks_per_lot * std::abs(ofi);
 
-    // Regime-adaptive minimum half-spread proportional to realized volatility (Fact 7).
-    constexpr double kVolBaseline = 0.003;
-    double rv = snap.base.realized_vol[0];
-    if (rv <= 0.0) rv = p_.sigma;
-    double min_half = std::max(1.0, rv / kVolBaseline);
-    spread_half = std::max(spread_half, min_half);
+    const double q      = snap.own_inventory;
+    const double q_soft = std::max(1.0, p_.q_soft);
+    const double reservation = belief_ - p_.inventory_skew_ticks * (q / q_soft);
 
-    Price bid_px = static_cast<Price>(std::floor(reservation - spread_half));
-    Price ask_px = static_cast<Price>(std::ceil (reservation + spread_half));
-    if (bid_px <= 0 || ask_px <= bid_px) return {};
+    Price bid_px = static_cast<Price>(std::floor(reservation - half));
+    Price ask_px = static_cast<Price>(std::ceil (reservation + half));
+    if (bid_px <= 0) return {};
+    if (ask_px <= bid_px) ask_px = bid_px + 1;
 
-    // TTL = tick + 2: two generations of orders survive the expire step so the
-    // publisher always sees a populated book (expire removes tick-2 orders after publish).
-    Tick ttl = snap.base.tick + 2;
+    // ── Size: the side that would grow the position fades out ─────────────
+    const double fade = std::max(0.0, 1.0 - std::abs(q) / q_soft);
+    const double base = static_cast<double>(p_.qty);
+    Qty bid_qty = static_cast<Qty>(std::llround(q > 0.0 ? base * fade : base));
+    Qty ask_qty = static_cast<Qty>(std::llround(q < 0.0 ? base * fade : base));
 
-    return {
-        submit(Side::Buy,  OrderType::Limit, bid_px, p_.qty, ttl),
-        submit(Side::Sell, OrderType::Limit, ask_px, p_.qty, ttl),
-    };
+    // ── Requote ───────────────────────────────────────────────────────────
+    // CancelAll goes out first so it carries a lower seq than the quotes and
+    // is applied before them at the same arrival tick.  The TTL is only a
+    // safety net for a cancel lost to latency, so it must sit clear of the
+    // requote cycle: the agent observes tick t-1 and the order reaches the
+    // book at t, where expire(t) runs before the snapshot is published.  A TTL
+    // of t-1+1 = t would therefore delete every quote before anyone could see
+    // it, leaving the book permanently empty.
+    const Tick ttl = snap.base.tick + 3;
+
+    std::vector<Action> out;
+    out.reserve(3);
+    out.push_back(cancel_all());
+    if (bid_qty > 0) out.push_back(submit(Side::Buy,  OrderType::Limit, bid_px, bid_qty, ttl));
+    if (ask_qty > 0) out.push_back(submit(Side::Sell, OrderType::Limit, ask_px, ask_qty, ttl));
+    return out;
 }

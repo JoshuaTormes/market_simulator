@@ -38,15 +38,17 @@ struct ParamRange {
 };
 
 struct MarketMakerParams {
-    int count = 3;
-    int mm_qty = 100;                              // shares per quote side
-    ParamRange<double> gamma_range    = {0.05, 0.20};
-    ParamRange<double> k_range        = {1.0,  4.0};
-    ParamRange<double> sigma_range    = {0.01, 0.04};  // fractional vol per tick
-    double T_horizon                  = 100.0;  // ticks
-    double beta_ofi                   = 0.35;   // Bayesian belief update speed from OFI
-    double adverse_sel                = 0.04;   // adverse selection spread multiplier
-    double belief_decay               = 0.05;   // reversion speed toward perceived mid
+    int count  = 3;
+    int mm_qty = 100;                       // lots per quote side at zero inventory
+    // Quote geometry in price ticks — the book is integer, so the maker is too.
+    double half_spread_min_ticks = 1.0;
+    double vol_mult              = 1.0;
+    double inventory_skew_ticks  = 4.0;
+    double adverse_sel_ticks_per_lot = 0.01;
+    double q_soft                = 300.0;   // position where the growing side stops quoting
+    // Belief dynamics.
+    double lambda_kyle  = 0.015;
+    double belief_decay = 0.02;
 };
 
 struct NoiseTraderParams {

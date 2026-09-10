@@ -8,6 +8,7 @@
 #include "InstitutionalExecutor.h"
 #include "StopLossCluster.h"
 #include "NewsReactor.h"
+#include <cmath>
 #include <random>
 #include <type_traits>
 
@@ -32,20 +33,26 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
     std::mt19937_64 eng = rng_.for_consumer("AgentFactory");
     std::vector<std::unique_ptr<IAgent>> agents;
 
-    // Market makers — Bayesian: infer value from order flow, not from fundamental
+    // Market makers — Bayesian: infer value from order flow, not from fundamental.
+    // max_position is 2·q_soft so the size fade, not the risk gate, is what
+    // stops them; a maker rejected by the gate simply vanishes from one side.
     for (int i = 0; i < cfg_.market_makers.count; ++i) {
         MarketMakerAS::Params p;
-        p.gamma        = sample(cfg_.market_makers.gamma_range, eng);
-        p.kappa        = sample(cfg_.market_makers.k_range, eng);
-        p.sigma        = sample(cfg_.market_makers.sigma_range, eng);
-        p.T            = cfg_.market_makers.T_horizon;
-        p.qty          = static_cast<Qty>(cfg_.market_makers.mm_qty);
-        p.beta_ofi     = cfg_.market_makers.beta_ofi;
-        p.adverse_sel  = cfg_.market_makers.adverse_sel;
-        p.belief_decay = cfg_.market_makers.belief_decay;
+        p.half_spread_min_ticks = cfg_.market_makers.half_spread_min_ticks;
+        p.vol_mult              = cfg_.market_makers.vol_mult;
+        p.inventory_skew_ticks  = cfg_.market_makers.inventory_skew_ticks;
+        p.adverse_sel_ticks_per_lot = cfg_.market_makers.adverse_sel_ticks_per_lot;
+        p.q_soft                = cfg_.market_makers.q_soft;
+        p.qty                   = static_cast<Qty>(cfg_.market_makers.mm_qty);
+        p.lambda_kyle           = cfg_.market_makers.lambda_kyle;
+        p.belief_decay          = cfg_.market_makers.belief_decay;
+
+        RiskLimits rl;
+        rl.max_position = static_cast<Qty>(std::llround(2.0 * cfg_.market_makers.q_soft));
+
         agents.emplace_back(std::make_unique<MarketMakerAS>(
             alloc_id(), ticker_, rng_.for_consumer("MM_" + std::to_string(i)),
-            p, RiskLimits{}, LatencyProfile{}, InformationProfile{}));
+            p, rl, LatencyProfile{}, InformationProfile{}, bus_));
     }
 
     // Noise traders
