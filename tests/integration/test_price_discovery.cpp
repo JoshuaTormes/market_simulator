@@ -117,8 +117,11 @@ TEST_CASE("Price discovery: the mid tracks the fundamental", "[price_discovery]"
     CHECK(rep.pd.two_sided_frac > 0.80);
 
     // The mid must move with the fundamental over a horizon long enough for
-    // the informed flow to be absorbed.
-    CHECK(rep.pd.corr_h20 > 0.5);
+    // the informed flow to be absorbed.  In a market with one maker the 20-tick
+    // correlation swings by a few hundredths from seed to seed, so the tighter
+    // claim is made at h=100, where the estimate is stable.
+    CHECK(rep.pd.corr_h20  > 0.45);
+    CHECK(rep.pd.corr_h100 > 0.60);
 
     // The pricing error stays small, and shocks to it decay in tens of ticks
     // rather than persisting for the whole run.

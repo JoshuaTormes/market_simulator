@@ -93,3 +93,43 @@ TEST_CASE("AgentFactory: only InformedTraderKyle sees fundamental", "[factory]")
         }
     }
 }
+
+TEST_CASE("AgentFactory: position limits come from the config", "[factory]") {
+    // A limit left at the 1000-lot default is what pinned the noise cohort
+    // against the risk gate; the factory must pass the configured one through.
+    PopulationConfig cfg;
+    cfg.market_makers.count    = 0;
+    cfg.informed_traders.count = 0;
+    cfg.momentum_traders.count = 0;
+    cfg.mean_reverters.count   = 0;
+    cfg.value_investors.count  = 0;
+    cfg.stop_loss.count        = 0;
+    cfg.noise_traders.count    = 2;
+    cfg.institutionals.count   = 1;
+    cfg.news_reactors.count    = 1;
+
+    cfg.noise_traders.max_position  = 5000;
+    cfg.institutionals.max_position = 4000;
+    cfg.news_reactors.max_position  = 2000;
+
+    RngService rng(42);
+    AgentFactory factory(cfg, rng, "T");
+    auto agents = factory.create_all();
+
+    for (const auto& a : agents) {
+        std::string t = a->type();
+        if      (t == "NoiseTrader")           CHECK(a->risk().max_position == 5000);
+        else if (t == "InstitutionalExecutor") CHECK(a->risk().max_position == 4000);
+        else if (t == "NewsReactor")           CHECK(a->risk().max_position == 2000);
+    }
+}
+
+TEST_CASE("AgentFactory: the default ecology pairs momentum against reversion",
+          "[factory]") {
+    // Trend followers alone are one-sided herding; the mean reverters are the
+    // counterparty that keeps the return ACF near zero.
+    PopulationConfig cfg;
+    CHECK(cfg.momentum_traders.count == 3);
+    CHECK(cfg.mean_reverters.count   == 2);
+    CHECK(cfg.institutionals.count   == 2);
+}

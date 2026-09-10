@@ -18,7 +18,13 @@ public:
     struct Params {
         double reaction_lag_mean  = 3.0;   // mean ticks before reacting (exponential)
         double sensitivity        = 1.0;   // multiplier on news impact_log_return
-        Qty    base_qty           = 20;
+        Qty    base_qty           = 20;    // lots for an impact of exactly impact_scale
+        // Reference impact the size is quoted against.  Announcement impacts are
+        // O(0.4%), so scaling qty by the raw log-return collapsed every reaction
+        // to the 1-lot floor and the reactors never moved the price.  Dividing
+        // by the scale makes base_qty the size of a *typical* headline and lets
+        // the Student-t tail produce the rare very large reaction.
+        double impact_scale       = 0.004;
         double dispersion_sigma   = 0.3;   // idiosyncratic noise on perceived impact
     };
 

@@ -54,8 +54,15 @@ struct MarketMakerParams {
 struct NoiseTraderParams {
     int count = 25;
     ParamRange<double> p_act_range    = {0.02, 0.10};
-    ParamRange<double> size_mu_range  = {0.5,  2.5};
+    // With size_sigma = 1.5 the lognormal mean is exp(mu + sigma^2/2), so this
+    // range puts E[size] between 8 and 23 lots, ~15 on average.
+    ParamRange<double> size_mu_range  = {1.0,  2.0};
     double size_sigma                 = 1.5;
+    // Inventory scale of the side tilt.  Uninformed does not mean unbounded:
+    // without this the cohort random-walks into its position limit and its
+    // rejected flow becomes a spurious directional push.
+    double q_scale                    = 500.0;
+    int    max_position               = 5000;
 };
 
 struct InformedTraderParams {
@@ -70,15 +77,18 @@ struct InformedTraderParams {
 };
 
 struct MomentumParams {
-    // count=1: calibrated dose — one momentum trader provides mild herding without
-    // dominating the ACF. Full calibration is done in Etapa 8.
-    int count = 1;
+    // count=3: three trend followers against two mean reverters.  The pair of
+    // opposing strategies is what keeps the return ACF near zero while still
+    // producing volatility clustering; a single momentum trader with no
+    // counterparty just adds one-sided herding.
+    int count = 3;
     ParamRange<int>    fast_range     = {5,  15};
     ParamRange<int>    slow_range     = {20, 50};
 };
 
 struct MeanReverterParams {
-    int count = 0;
+    // count=2: the counterweight to the momentum cohort (see MomentumParams).
+    int count = 2;
     ParamRange<double> entry_z_range  = {1.5, 3.0};
     ParamRange<int>    window_range   = {20,  60};
 };
@@ -89,18 +99,29 @@ struct ValueInvestorParams {
 };
 
 struct InstitutionalParams {
-    int    count         = 1;     // re-enabled: Pareto sizing drives fat tails
-    int    parent_qty    = 500;
-    int    slices        = 20;
-    double pareto_alpha  = 1.5;   // Pareto tail exponent for child order sizing
-    int    max_child_qty = 200;   // hard cap per child order
+    int    count          = 2;      // two desks: order splitting drives fat tails
+    // Parent arrival process — a desk that receives one order per run stops
+    // contributing flow after the first hundred ticks.
+    double arrival_lambda = 0.002;  // P(new parent | idle tick) ≈ one per 500 ticks
+    int    parent_min     = 200;    // Pareto parent size, truncated to
+    int    parent_max     = 3000;   // [parent_min, parent_max]
+    double parent_alpha   = 1.5;    // Pareto tail exponent for parent size
+    int    slices         = 20;
+    int    ticks_between  = 5;
+    double pareto_alpha   = 1.5;    // Pareto tail exponent for child order sizing
+    int    max_child_qty  = 200;    // hard cap per child order
+    int    max_position   = 4000;
 };
 
 struct StopLossParams {
     int   count                       = 6;
     int64_t entry_price_ticks         = 10000; // reference price for seeded positions
-    ParamRange<double> trigger_range  = {0.04, 0.08};  // 4-8% drop: avoids noise false-triggers
+    // 1.5-4%: with the price now tracking the fundamental to within ~0.2% the
+    // old 4-8% band was almost never reached, so no cascade ever formed.
+    ParamRange<double> trigger_range  = {0.015, 0.04};
     ParamRange<int>    qty_range      = {10,   75};  // 6×75=450 < 600 MM depth: avoids bid depletion
+    // Ticks flat after a stop fires before a new position is established.
+    ParamRange<int>    cooldown_range = {200, 800};
 };
 
 struct NewsReactorParams {
@@ -108,9 +129,13 @@ struct NewsReactorParams {
     // Each reactor fires once per tick for the full event duration (duration_ticks),
     // creating sustained directional OFI that drives vol clustering (Facts 3 & 4).
     int count = 8;
-    int base_qty = 50;                             // shares per reaction tick (8×50=400 < 600 MM depth)
+    int base_qty = 50;                             // lots per reaction tick for a typical headline
     ParamRange<double> lag_range      = {0, 1};
     ParamRange<double> sensitivity_range = {0.5, 2.0};
+    // Reference impact base_qty is quoted against — keep in sync with
+    // NewsConfig::impact_scale, or reactions collapse to the 1-lot floor.
+    double impact_scale = 0.004;
+    int    max_position = 2000;
 };
 
 // ── Population config ──────────────────────────────────────────────────────

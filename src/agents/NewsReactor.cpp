@@ -19,7 +19,9 @@ NewsReactor::NewsReactor(AgentId id, const std::string& ticker,
             double lag  = lag_dist_(rng_);
             Tick start  = ev.announce_tick + static_cast<Tick>(std::round(lag));
             Side side   = (perceived_impact > 0.0) ? Side::Buy : Side::Sell;
-            double scale = std::min(std::abs(perceived_impact) * static_cast<double>(p_.base_qty),
+            const double ref = (p_.impact_scale > 0.0) ? p_.impact_scale : 1.0;
+            double scale = std::min(std::abs(perceived_impact) / ref
+                                        * static_cast<double>(p_.base_qty),
                                     static_cast<double>(rl_.max_position));
             Qty qty = std::max(Qty{1}, static_cast<Qty>(std::round(scale)));
 

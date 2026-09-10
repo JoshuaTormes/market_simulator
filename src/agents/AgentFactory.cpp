@@ -61,9 +61,12 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
         p.p_act      = sample(cfg_.noise_traders.p_act_range, eng);
         p.size_mu    = sample(cfg_.noise_traders.size_mu_range, eng);
         p.size_sigma = cfg_.noise_traders.size_sigma;
+        p.q_scale    = cfg_.noise_traders.q_scale;
+        RiskLimits rl;
+        rl.max_position = static_cast<Qty>(cfg_.noise_traders.max_position);
         agents.emplace_back(std::make_unique<NoiseTrader>(
             alloc_id(), ticker_, rng_.for_consumer("NT_" + std::to_string(i)),
-            p));
+            p, rl));
     }
 
     // Informed traders — trade the gap between a noisy private value and the
@@ -117,26 +120,36 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
             p, RiskLimits{}, LatencyProfile{}, InformationProfile{}));
     }
 
-    // Institutional executor — Pareto-truncated child sizes for heavy-tailed trade flow
+    // Institutional desks — Poisson parent arrivals, Pareto parent and child
+    // sizes: order splitting is what makes trade flow heavy-tailed and its sign
+    // persistent.
     for (int i = 0; i < cfg_.institutionals.count; ++i) {
         InstitutionalExecutor::Params p;
-        p.parent_qty    = static_cast<Qty>(cfg_.institutionals.parent_qty);
-        p.total_slices  = cfg_.institutionals.slices;
-        p.pareto_alpha  = cfg_.institutionals.pareto_alpha;
-        p.max_child_qty = static_cast<Qty>(cfg_.institutionals.max_child_qty);
-        p.side = (i % 2 == 0) ? Side::Buy : Side::Sell;
+        p.arrival_lambda = cfg_.institutionals.arrival_lambda;
+        p.parent_min     = static_cast<Qty>(cfg_.institutionals.parent_min);
+        p.parent_max     = static_cast<Qty>(cfg_.institutionals.parent_max);
+        p.parent_alpha   = cfg_.institutionals.parent_alpha;
+        p.total_slices   = cfg_.institutionals.slices;
+        p.ticks_between  = cfg_.institutionals.ticks_between;
+        p.pareto_alpha   = cfg_.institutionals.pareto_alpha;
+        p.max_child_qty  = static_cast<Qty>(cfg_.institutionals.max_child_qty);
+        RiskLimits rl;
+        rl.max_position = static_cast<Qty>(cfg_.institutionals.max_position);
         agents.emplace_back(std::make_unique<InstitutionalExecutor>(
             alloc_id(), ticker_, rng_.for_consumer("IE_" + std::to_string(i)),
-            p));
+            p, rl));
     }
 
     // Stop-loss clusters — seeded with initial ledger position when ledger is wired
     for (int i = 0; i < cfg_.stop_loss.count; ++i) {
         StopLossCluster::Params p;
-        p.trigger_pct  = sample(cfg_.stop_loss.trigger_range, eng);
-        p.qty          = static_cast<Qty>(sample(cfg_.stop_loss.qty_range, eng));
-        p.entry_price  = static_cast<Price>(cfg_.stop_loss.entry_price_ticks);
-        p.initial_side = (i % 2 == 0) ? Side::Buy : Side::Sell;
+        p.trigger_pct    = sample(cfg_.stop_loss.trigger_range, eng);
+        p.qty            = static_cast<Qty>(sample(cfg_.stop_loss.qty_range, eng));
+        p.entry_price    = static_cast<Price>(cfg_.stop_loss.entry_price_ticks);
+        p.initial_side   = (i % 2 == 0) ? Side::Buy : Side::Sell;
+        p.cooldown_ticks = sample(cfg_.stop_loss.cooldown_range, eng);
+        p.qty_min        = static_cast<Qty>(cfg_.stop_loss.qty_range.min_val);
+        p.qty_max        = static_cast<Qty>(cfg_.stop_loss.qty_range.max_val);
         AgentId aid = alloc_id();
         agents.emplace_back(std::make_unique<StopLossCluster>(
             aid, ticker_, rng_.for_consumer("SL_" + std::to_string(i)), p));
@@ -154,9 +167,12 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
         p.reaction_lag_mean = sample(cfg_.news_reactors.lag_range, eng);
         p.sensitivity       = sample(cfg_.news_reactors.sensitivity_range, eng);
         p.base_qty          = static_cast<Qty>(cfg_.news_reactors.base_qty);
+        p.impact_scale      = cfg_.news_reactors.impact_scale;
+        RiskLimits rl;
+        rl.max_position = static_cast<Qty>(cfg_.news_reactors.max_position);
         agents.emplace_back(std::make_unique<NewsReactor>(
             alloc_id(), ticker_, rng_.for_consumer("NR_" + std::to_string(i)),
-            p, bus_));
+            p, bus_, rl));
     }
 
     return agents;

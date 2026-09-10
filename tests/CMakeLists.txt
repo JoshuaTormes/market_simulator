@@ -47,6 +47,8 @@ add_sim_test(test_stop_loss_ledger       unit/test_stop_loss_ledger.cpp)
 add_sim_test(test_fundamental_factory    unit/test_fundamental_factory.cpp)
 add_sim_test(test_kyle_informed          unit/test_kyle_informed.cpp)
 add_sim_test(test_noise_trader           unit/test_noise_trader.cpp)
+add_sim_test(test_institutional_executor unit/test_institutional_executor.cpp)
+add_sim_test(test_news_reactor           unit/test_news_reactor.cpp)
 add_sim_test(test_risk_gate              unit/test_risk_gate.cpp)
 add_sim_test(test_agent_factory          unit/test_agent_factory.cpp)
 # Phase 6
