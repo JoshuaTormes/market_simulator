@@ -24,7 +24,8 @@ enum class EventTag : uint8_t {
 };
 
 static constexpr uint32_t kFileMagic     = 0x534D4C42u;  // 'SMLB'
-static constexpr uint16_t kSchemaVersion = 2;            // v2: ofi_tick replaces order_flow_imbalance field
+static constexpr uint16_t kSchemaVersion = 3;            // v3: MarketSnapshotRecord gains fundamental_value
+static constexpr uint16_t kMinReadableVersion = 1;       // v1/v2 logs stay readable (fundamental_value = 0)
 
 // ── Packed payload records ────────────────────────────────────────────────────
 #pragma pack(push, 1)
@@ -57,6 +58,27 @@ struct TradeRecord {
 };
 static_assert(sizeof(TradeRecord) == 88, "TradeRecord size changed");
 
+// v1/v2 snapshot layout — kept verbatim so old logs stay readable.  v2 only
+// changed the meaning of the ofi field, not the bytes, so one struct covers
+// both.  Do not modify.
+struct MarketSnapshotRecordV2 {
+    Tick    tick;
+    Price   mid_price;
+    Price   spread;
+    Price   last_trade_price;
+    double  realized_vol_s;
+    double  realized_vol_m;
+    double  realized_vol_l;
+    double  vwap_s;
+    double  ofi_tick;
+    double  trade_imbalance;
+    double  momentum;
+    double  book_imbalance_l1;
+    int8_t  regime;
+    uint8_t _pad[7];
+};
+static_assert(sizeof(MarketSnapshotRecordV2) == 104, "MarketSnapshotRecordV2 is frozen");
+
 struct MarketSnapshotRecord {
     Tick    tick;
     Price   mid_price;
@@ -70,10 +92,24 @@ struct MarketSnapshotRecord {
     double  trade_imbalance;
     double  momentum;
     double  book_imbalance_l1;
+    double  fundamental_value; // v3: latent V in tick-units (0.0 in v2 logs)
     int8_t  regime;
     uint8_t _pad[7];
 };
-static_assert(sizeof(MarketSnapshotRecord) == 104, "MarketSnapshotRecord size changed");
+static_assert(sizeof(MarketSnapshotRecord) == 112, "MarketSnapshotRecord size changed");
+
+// Widen a v2 record into the current layout (fundamental_value unknown → 0).
+inline MarketSnapshotRecord upgrade_v2(const MarketSnapshotRecordV2& o) {
+    MarketSnapshotRecord r{};
+    r.tick = o.tick;                     r.mid_price = o.mid_price;
+    r.spread = o.spread;                 r.last_trade_price = o.last_trade_price;
+    r.realized_vol_s = o.realized_vol_s; r.realized_vol_m = o.realized_vol_m;
+    r.realized_vol_l = o.realized_vol_l; r.vwap_s = o.vwap_s;
+    r.ofi_tick = o.ofi_tick;             r.trade_imbalance = o.trade_imbalance;
+    r.momentum = o.momentum;             r.book_imbalance_l1 = o.book_imbalance_l1;
+    r.fundamental_value = 0.0;           r.regime = o.regime;
+    return r;
+}
 
 struct NewsEventRecord {
     Tick    announce_tick;

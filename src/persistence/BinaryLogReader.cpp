@@ -19,8 +19,9 @@ bool BinaryLogReader::read_header(FileHeaderRecord* out) {
 
     FileHeaderRecord hdr{};
     if (std::fread(&hdr, sizeof(hdr), 1, fp_) != 1) return false;
-    if (hdr.magic   != kFileMagic)     return false;
-    if (hdr.version != kSchemaVersion) return false;
+    if (hdr.magic != kFileMagic) return false;
+    if (hdr.version < kMinReadableVersion || hdr.version > kSchemaVersion) return false;
+    version_ = hdr.version;
 
     ++records_read_;
     if (out) *out = hdr;
@@ -39,6 +40,14 @@ std::optional<LogRecord> BinaryLogReader::next() {
     auto tag = static_cast<EventTag>(tag_byte);
     size_t sz = payload_size(tag);
     if (sz == 0) { at_eof_ = true; return std::nullopt; }
+
+    // Snapshots grew a field in v3; older files use the frozen v2 layout.
+    if (tag == EventTag::MarketSnapshot && version_ < 3) {
+        MarketSnapshotRecordV2 old{};
+        if (std::fread(&old, sizeof(old), 1, fp_) != 1) { at_eof_ = true; return std::nullopt; }
+        ++records_read_;
+        return upgrade_v2(old);
+    }
 
     switch (tag) {
         case EventTag::FileHeader: {

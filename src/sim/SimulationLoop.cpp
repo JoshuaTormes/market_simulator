@@ -134,7 +134,8 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
 
     // 9. Publish market data snapshot.
     MarketSnapshot snap = publisher_.publish(now);
-    snap.regime = fundamental_.current_regime_hint();
+    snap.regime            = fundamental_.current_regime_hint();
+    snap.fundamental_value = fundamental_ticks;
 
     // Detect and log regime changes before updating prev_snap_.
     if (log_writer_ && now > 0 && snap.regime != prev_snap_.regime)

@@ -10,6 +10,7 @@ Expects:
     <csv_dir>/trades.csv      — tick,seq_no,price,qty,taker_side,...
 
 Reports (all referenced in spec 2026-05-23_mercado-endogeno):
+  - Price discovery: corr(rV, r_mid) at horizons, log(mid/V) dispersion + half-life
   - Fundamental contamination: % ticks where spread==0 (mid set to fundamental)
   - Return provenance: % returns from fundamental-anchored ticks
   - ACF of r, |r|, OFI (with ±1.96/√N significance bands)
@@ -51,6 +52,18 @@ def acf(series, max_lag=20):
         cov = sum(centered[i] * centered[i + lag] for i in range(n - lag)) / n
         acf_vals.append(cov / var)
     return acf_vals
+
+
+def pearson(x, y):
+    n = min(len(x), len(y))
+    if n < 4:
+        return float("nan")
+    mx = statistics.mean(x[:n])
+    my = statistics.mean(y[:n])
+    num = sum((x[i] - mx) * (y[i] - my) for i in range(n))
+    dx = math.sqrt(sum((x[i] - mx) ** 2 for i in range(n)))
+    dy = math.sqrt(sum((y[i] - my) ** 2 for i in range(n)))
+    return num / (dx * dy) if dx > 0 and dy > 0 else float("nan")
 
 
 def kurtosis_excess(series):
@@ -149,6 +162,30 @@ def run(csv_dir):
     p_last = mid_prices[-1]
     pct_change = 100.0 * (p_last - p0) / p0 if p0 else 0
     print(f"[PRICE TRAJECTORY] start={p0:.0f}, end={p_last:.0f}, change={pct_change:+.1f}%")
+    print()
+
+    # ── Price discovery vs. the latent fundamental (schema v3 only) ──────────
+    fundamentals = [float(s_["fundamental_value"]) for s_ in snaps
+                    if "fundamental_value" in s_ and float(s_["mid_price"]) > 0]
+    if fundamentals and any(v > 0 for v in fundamentals):
+        fv, mp = zip(*[(v, m) for v, m in zip(fundamentals, mid_prices) if v > 0 and m > 0])
+        print(f"[PRICE DISCOVERY] V: start={fv[0]:.0f}, end={fv[-1]:.0f}, "
+              f"change={100.0 * (fv[-1] - fv[0]) / fv[0]:+.1f}%")
+        for h in (1, 5, 20, 100):
+            rv, rm = [], []
+            for i in range(h, len(fv), h):
+                rv.append(math.log(fv[i] / fv[i - h]))
+                rm.append(math.log(mp[i] / mp[i - h]))
+            print(f"  corr(rV, r_mid) h={h:<3d} = {pearson(rv, rm):+.3f}  (n={len(rv)})")
+        gap = [math.log(m / v) for v, m in zip(fv, mp)]
+        gm = statistics.mean(gap)
+        gs = statistics.pstdev(gap)
+        rho = acf(gap, 1)[0] if len(gap) > 8 else 0.0
+        hl = math.log(0.5) / math.log(rho) if 0.0 < rho < 1.0 else float("inf")
+        print(f"  log(mid/V) = {gm:+.4f} +- {gs:.4f}  (target std < 0.01)")
+        print(f"  gap AR(1) rho = {rho:.4f}, half-life = {hl:.1f} ticks (target < 50)")
+    else:
+        print("[PRICE DISCOVERY] no fundamental_value column (log predates schema v3)")
     print()
 
     # ── ACF of returns, |returns|, OFI ──────────────────────────────────────

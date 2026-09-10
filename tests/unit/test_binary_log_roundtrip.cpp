@@ -7,6 +7,7 @@
 #include "orderbook/Trade.h"
 #include "marketdata/MarketSnapshot.h"
 #include "economics/NewsEvent.h"
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 
@@ -89,6 +90,7 @@ TEST_CASE("BinaryLog: market snapshot round-trip", "[binlog]") {
         s.trade_imbalance   = 0.55;
         s.momentum          = 0.002;
         s.book_imbalance[0] = 0.12;
+        s.fundamental_value = 10123.75;
         s.regime            = 1;
         w.write_snapshot(s);
     }
@@ -105,7 +107,60 @@ TEST_CASE("BinaryLog: market snapshot round-trip", "[binlog]") {
     CHECK(sr->realized_vol_s    == Catch::Approx(0.0123));
     CHECK(sr->vwap_s            == Catch::Approx(10045.5));
     CHECK(sr->ofi_tick             == Catch::Approx(0.31));
+    CHECK(sr->fundamental_value == Catch::Approx(10123.75));
     CHECK(sr->regime            == 1);
+}
+
+// A v2 log has no fundamental_value.  The reader must still open it and widen
+// each snapshot into the current layout, leaving the missing field at 0.
+TEST_CASE("BinaryLog: v2 snapshots are still readable", "[binlog]") {
+    const std::string path = tmp_path("rt_snap_v2.bin");
+    {
+        FILE* f = std::fopen(path.c_str(), "wb");
+        REQUIRE(f != nullptr);
+
+        FileHeaderRecord hdr{};
+        hdr.magic   = kFileMagic;
+        hdr.version = 2;
+        hdr.seed    = 7;
+        hdr.max_ticks = 10;
+        hdr.publish_interval = 1;
+        std::memcpy(hdr.ticker, "OLD", 4);
+        uint8_t tag = static_cast<uint8_t>(EventTag::FileHeader);
+        std::fwrite(&tag, 1, 1, f);
+        std::fwrite(&hdr, sizeof(hdr), 1, f);
+
+        MarketSnapshotRecordV2 old{};
+        old.tick             = 11;
+        old.mid_price        = 9990;
+        old.spread           = 2;
+        old.last_trade_price = 9989;
+        old.realized_vol_s   = 0.005;
+        old.vwap_s           = 9988.5;
+        old.ofi_tick         = -1.25;
+        old.regime           = 2;
+        tag = static_cast<uint8_t>(EventTag::MarketSnapshot);
+        std::fwrite(&tag, 1, 1, f);
+        std::fwrite(&old, sizeof(old), 1, f);
+        std::fclose(f);
+    }
+
+    BinaryLogReader r(path);
+    REQUIRE(r.read_header());
+    CHECK(r.version() == 2);
+    auto rec = r.next();
+    REQUIRE(rec.has_value());
+    auto* sr = std::get_if<MarketSnapshotRecord>(&*rec);
+    REQUIRE(sr != nullptr);
+    CHECK(sr->tick              == 11);
+    CHECK(sr->mid_price         == 9990);
+    CHECK(sr->spread            == 2);
+    CHECK(sr->last_trade_price  == 9989);
+    CHECK(sr->realized_vol_s    == Catch::Approx(0.005));
+    CHECK(sr->vwap_s            == Catch::Approx(9988.5));
+    CHECK(sr->ofi_tick          == Catch::Approx(-1.25));
+    CHECK(sr->regime            == 2);
+    CHECK(sr->fundamental_value == 0.0);   // absent in v2
 }
 
 TEST_CASE("BinaryLog: news event round-trip", "[binlog]") {

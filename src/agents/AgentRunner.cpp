@@ -1,4 +1,5 @@
 #include "AgentRunner.h"
+#include <cmath>
 #include <random>
 
 AgentRunner::AgentRunner(std::vector<IAgent*> agents, uint64_t seed,
@@ -14,6 +15,7 @@ std::vector<AgentAction> AgentRunner::run(const MarketSnapshot& snap,
     if (history_.size() > kMaxDelay + 1)
         history_.pop_front();
 
+    ++ticks_run_;
     std::vector<AgentAction> out;
 
     for (IAgent* agent : agents_) {
@@ -40,6 +42,10 @@ std::vector<AgentAction> AgentRunner::run(const MarketSnapshot& snap,
         if (ledger_ && !ticker_.empty()) {
             as.own_inventory = static_cast<double>(ledger_->net_qty(agent->id(), ticker_));
             as.own_avg_cost  = static_cast<double>(ledger_->avg_cost(agent->id(), ticker_));
+
+            const double max_pos = static_cast<double>(agent->risk().max_position);
+            if (max_pos > 0.0 && std::abs(as.own_inventory) >= 0.95 * max_pos)
+                ++ticks_at_limit_[agent->id()];
         }
 
         auto actions = agent->on_market_data(as);

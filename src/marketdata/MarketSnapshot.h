@@ -47,5 +47,10 @@ struct MarketSnapshot {
     // Regime from fundamental process (-1 = not applicable, set by SimulationLoop).
     int regime = -1;
 
+    // Latent fundamental value in tick-units, set by SimulationLoop.  Never
+    // visible to agents (they read it only via sees_fundamental); logged so
+    // price discovery can be measured offline.
+    double fundamental_value = 0.0;
+
     bool is_valid() const { return spread >= 0; }
 };

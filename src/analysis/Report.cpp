@@ -70,6 +70,45 @@ static double ljung_box_q(const std::vector<double>& acf, int n, int m) {
     return static_cast<double>(n) * (n + 2) * q;
 }
 
+// Upper-tail p-value of a chi^2(df) variate, Wilson-Hilferty cube-root
+// approximation (accurate to ~1e-3 for df >= 5, which is all we need here).
+static double chi2_sf(double q, int df) {
+    if (df <= 0) return 1.0;
+    if (q <= 0.0) return 1.0;
+    const double d = static_cast<double>(df);
+    double z = (std::cbrt(q / d) - (1.0 - 2.0 / (9.0 * d))) / std::sqrt(2.0 / (9.0 * d));
+    return 0.5 * std::erfc(z / std::sqrt(2.0));
+}
+
+// corr(log(a_{t+h}/a_t), log(b_{t+h}/b_t)) over NON-overlapping blocks of h.
+// Non-overlapping avoids the spurious inflation that overlapping windows give.
+static double horizon_corr(const std::vector<double>& a,
+                           const std::vector<double>& b, size_t h) {
+    size_t n = std::min(a.size(), b.size());
+    if (h == 0 || n < 4 * h) return 0.0;
+    std::vector<double> ra, rb;
+    for (size_t i = h; i < n; i += h) {
+        if (a[i] <= 0.0 || a[i - h] <= 0.0 || b[i] <= 0.0 || b[i - h] <= 0.0) continue;
+        ra.push_back(std::log(a[i] / a[i - h]));
+        rb.push_back(std::log(b[i] / b[i - h]));
+    }
+    return pearson_corr(ra, rb);
+}
+
+// Lag-1 autocorrelation, computed directly (AcfComputer would do, but this
+// keeps the gap series independent of the max-lag machinery).
+static double ar1_rho(const std::vector<double>& v) {
+    if (v.size() < 8) return 0.0;
+    double m = mean_of(v);
+    double num = 0.0, den = 0.0;
+    for (size_t i = 0; i < v.size(); ++i) {
+        double d = v[i] - m;
+        den += d * d;
+        if (i + 1 < v.size()) num += d * (v[i + 1] - m);
+    }
+    return (den > 1e-30) ? num / den : 0.0;
+}
+
 // Multi-k Hill: run Hill at several k values and return mean/std of alpha estimates.
 static void hill_multi_k(const std::vector<double>& rets,
                          double& mean_alpha, double& std_alpha) {
@@ -107,16 +146,26 @@ struct LogData {
     std::vector<uint64_t> price_ticks;
     std::vector<double>   spreads;
     std::vector<double>   ofi;
+    std::vector<double>   fundamental;       // latent V in ticks (empty on v2 logs)
     std::vector<double>   trade_signs;       // +1 = buy-aggressor, -1 = sell-aggressor
     std::vector<double>   volume_per_snap;   // total trade volume since last snapshot
     size_t                n_trades    = 0;
     size_t                n_snapshots = 0;
+    size_t                n_two_sided = 0;   // snapshots with spread > 0
+    double                mm_volume   = 0.0; // volume with MM maker and MM taker
+    double                total_volume = 0.0;
+    bool                  has_fundamental = false;
 };
 
-static LogData extract(const std::string& bin_path) {
+static LogData extract(const std::string& bin_path,
+                       const std::vector<AgentId>& mm_ids) {
     LogData d;
     BinaryLogReader r(bin_path);
     if (!r.read_header()) return d;
+
+    auto is_mm = [&](AgentId a) {
+        return std::find(mm_ids.begin(), mm_ids.end(), a) != mm_ids.end();
+    };
 
     double pending_volume = 0.0;
 
@@ -127,13 +176,19 @@ static LogData extract(const std::string& bin_path) {
                 d.price_ticks.push_back(sr->tick);
                 d.spreads.push_back(static_cast<double>(sr->spread));
                 d.ofi.push_back(sr->ofi_tick);
+                d.fundamental.push_back(sr->fundamental_value);
                 d.volume_per_snap.push_back(pending_volume);
                 pending_volume = 0.0;
+                if (sr->spread > 0) ++d.n_two_sided;
+                if (sr->fundamental_value > 0.0) d.has_fundamental = true;
             }
             ++d.n_snapshots;
         } else if (auto* tr = std::get_if<TradeRecord>(&*rec)) {
             d.trade_signs.push_back(tr->taker_side == 0 ? 1.0 : -1.0);
             pending_volume += static_cast<double>(tr->qty);
+            d.total_volume += static_cast<double>(tr->qty);
+            if (!mm_ids.empty() && is_mm(tr->maker_agent) && is_mm(tr->taker_agent))
+                d.mm_volume += static_cast<double>(tr->qty);
             ++d.n_trades;
         }
     }
@@ -152,10 +207,11 @@ static std::vector<double> log_returns(const std::vector<double>& prices) {
 
 // ── Report::run ───────────────────────────────────────────────────────────────
 
-AnalysisReport Report::run(const std::string& bin_path) {
+AnalysisReport Report::run(const std::string& bin_path,
+                           const std::vector<AgentId>& mm_ids) {
     AnalysisReport rep;
 
-    LogData d = extract(bin_path);
+    LogData d = extract(bin_path, mm_ids);
     rep.n_trades    = d.n_trades;
     rep.n_snapshots = d.n_snapshots;
 
@@ -180,6 +236,7 @@ AnalysisReport Report::run(const std::string& bin_path) {
     // ── Ljung-Box Q(10) and multi-k Hill (extra diagnostics) ──────────────────
     rep.ljung_box_df = 10;
     rep.ljung_box_q  = ljung_box_q(acf_ret.acf, N, rep.ljung_box_df);
+    rep.ljung_box_p  = chi2_sf(rep.ljung_box_q, rep.ljung_box_df);
     hill_multi_k(rets, rep.hill_alpha_mean, rep.hill_alpha_std);
 
     // ── Trade sign ACF (order-splitting indicator) ─────────────────────────────
@@ -208,30 +265,31 @@ AnalysisReport Report::run(const std::string& bin_path) {
             "excess kurtosis of log-returns > 1.0"));
     }
 
-    // ── Fact 2: Return ACF ≈ 0 at lag 1 ──────────────────────────────────────
+    // ── Fact 2: Return ACF ≈ 0 at lags 1 AND 2 ───────────────────────────────
+    // Both lags are tested: a market that merely pushes its momentum from lag 1
+    // to lag 2 has not removed the arbitrage, only relabelled it.  The reported
+    // value is the larger of the two absolute autocorrelations.
     {
-        double val  = acf_ret.acf.size() > 1 ? std::abs(acf_ret.acf[1]) : 1.0;
-        // Fixed threshold: economically "approximately zero" for a simulation.
-        // 2/sqrt(N) is too tight at large N (statistically rejects any real market).
-        constexpr double kAcfThreshold = 0.10;
+        double a1 = acf_ret.acf.size() > 1 ? std::abs(acf_ret.acf[1]) : 1.0;
+        double a2 = acf_ret.acf.size() > 2 ? std::abs(acf_ret.acf[2]) : 1.0;
+        double val = std::max(a1, a2);
+        constexpr double kAcfThreshold = 0.05;
         rep.results.push_back(make(
-            "Return ACF ≈ 0 (lag 1)",
+            "Return ACF ≈ 0 (lags 1,2)",
             val < kAcfThreshold,
             val, kAcfThreshold,
-            "|ACF(r, lag=1)| < 0.10 — returns approximately serially uncorrelated",
+            "max(|ACF(r,1)|,|ACF(r,2)|) < 0.05 — no exploitable serial correlation",
             ci));
     }
 
-    // ── Fact 3: Volatility clustering (ACF|r| lag=2 > 0.05) ──────────────────
-    // Agents observe prev_snap (1-tick lag), so price reacts to crash OFI one tick
-    // late; vol clustering manifests at lag=2 rather than lag=1 in this architecture.
+    // ── Fact 3: Volatility clustering (ACF|r| lag=1 > 0.05) ──────────────────
     {
-        double val = acf_abs.acf.size() > 2 ? acf_abs.acf[2] : 0.0;
+        double val = acf_abs.acf.size() > 1 ? acf_abs.acf[1] : 0.0;
         rep.results.push_back(make(
-            "Vol clustering (ACF|r| lag=2)",
+            "Vol clustering (ACF|r| lag=1)",
             val > 0.05,
             val, 0.05,
-            "ACF(|r|, lag=2) > 0.05 — volatility is serially correlated (1-tick obs lag)",
+            "ACF(|r|, lag=1) > 0.05 — volatility is serially correlated",
             ci));
     }
 
@@ -311,6 +369,42 @@ AnalysisReport Report::run(const std::string& bin_path) {
             "order-flow imbalance shows serial correlation — flow toxicity clusters"));
     }
 
+    // ── Price discovery (diagnostics, not pass/fail) ──────────────────────────
+    {
+        auto& pd = rep.pd;
+        pd.two_sided_frac = d.mid_prices.empty()
+            ? 0.0 : static_cast<double>(d.n_two_sided) / d.mid_prices.size();
+        {
+            size_t zeros = 0;
+            for (double x : rets) if (x == 0.0) ++zeros;
+            pd.zero_ret_frac = rets.empty() ? 0.0
+                : static_cast<double>(zeros) / rets.size();
+        }
+        pd.mm_self_trade_frac = (d.total_volume > 0.0)
+            ? d.mm_volume / d.total_volume : 0.0;
+
+        pd.has_fundamental = d.has_fundamental;
+        if (pd.has_fundamental) {
+            pd.corr_h1   = horizon_corr(d.fundamental, d.mid_prices, 1);
+            pd.corr_h5   = horizon_corr(d.fundamental, d.mid_prices, 5);
+            pd.corr_h20  = horizon_corr(d.fundamental, d.mid_prices, 20);
+            pd.corr_h100 = horizon_corr(d.fundamental, d.mid_prices, 100);
+
+            std::vector<double> gap;
+            gap.reserve(d.mid_prices.size());
+            for (size_t i = 0; i < d.mid_prices.size(); ++i)
+                if (d.fundamental[i] > 0.0 && d.mid_prices[i] > 0.0)
+                    gap.push_back(std::log(d.mid_prices[i] / d.fundamental[i]));
+            if (!gap.empty()) {
+                pd.gap_mean = mean_of(gap);
+                pd.gap_std  = std::sqrt(variance_of(gap, pd.gap_mean));
+                double rho  = ar1_rho(gap);
+                pd.gap_half_life = (rho > 0.0 && rho < 1.0)
+                    ? std::log(0.5) / std::log(rho) : 0.0;
+            }
+        }
+    }
+
     // ── Flash crash detection (informational only) ────────────────────────────
     {
         FlashCrashDetector::Config fcc{4.0, 10, 30, 0.50, 30}; // relaxed threshold
@@ -355,8 +449,8 @@ std::string AnalysisReport::to_text() const {
     {
         char buf[256];
         std::snprintf(buf, sizeof(buf),
-            "  Ljung-Box Q(%d)     = %.2f  (large Q → autocorrelated returns)\n",
-            ljung_box_df, ljung_box_q);
+            "  Ljung-Box Q(%d)     = %.2f  (p = %.4g; p < 0.05 → autocorrelated returns)\n",
+            ljung_box_df, ljung_box_q, ljung_box_p);
         os << buf;
         std::snprintf(buf, sizeof(buf),
             "  Hill α multi-k      = %.3f ± %.3f  (stability: std/mean = %.2f)\n",
@@ -371,6 +465,43 @@ std::string AnalysisReport::to_text() const {
             "  Vol-volume corr     = %.4f  (>0 → volume predicts volatility)\n",
             vol_vol_corr);
         os << buf;
+    }
+
+    // ── Price discovery ───────────────────────────────────────────────────────
+    os << "\nPrice discovery:\n";
+    {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "  Two-sided book      = %6.2f%%  (target >= 99%%)\n",
+            100.0 * pd.two_sided_frac);
+        os << buf;
+        std::snprintf(buf, sizeof(buf),
+            "  Zero returns        = %6.2f%%  (a frozen mid is not a price)\n",
+            100.0 * pd.zero_ret_frac);
+        os << buf;
+        std::snprintf(buf, sizeof(buf),
+            "  MM-vs-MM volume     = %6.2f%%  (target < 5%%)\n",
+            100.0 * pd.mm_self_trade_frac);
+        os << buf;
+        if (!pd.has_fundamental) {
+            os << "  corr(V, mid)        = n/a (log has no fundamental_value; schema < v3)\n";
+        } else {
+            std::snprintf(buf, sizeof(buf),
+                "  corr(rV, r_mid)     = %.3f (h=1)  %.3f (h=5)  %.3f (h=20)  %.3f (h=100)\n",
+                pd.corr_h1, pd.corr_h5, pd.corr_h20, pd.corr_h100);
+            os << buf;
+            std::snprintf(buf, sizeof(buf),
+                "  log(mid/V)          = %+.4f ± %.4f  (target std < 0.01)\n",
+                pd.gap_mean, pd.gap_std);
+            os << buf;
+            if (pd.gap_half_life > 0.0)
+                std::snprintf(buf, sizeof(buf),
+                    "  gap half-life       = %6.1f ticks  (target < 50)\n", pd.gap_half_life);
+            else
+                std::snprintf(buf, sizeof(buf),
+                    "  gap half-life       = no mean reversion (AR(1) rho outside (0,1))\n");
+            os << buf;
+        }
     }
     return os.str();
 }

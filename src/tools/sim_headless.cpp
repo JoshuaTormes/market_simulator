@@ -19,8 +19,11 @@
 #include "risk/RiskGate.h"
 #include "sim/SimulationLoop.h"
 #include "persistence/BinaryLogWriter.h"
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -123,8 +126,49 @@ int main(int argc, char** argv) {
                  cfg.log_output_path.c_str(),
                  log_writer.bytes_written() / 1024.0);
 
+    // ── Per-agent-type summary ───────────────────────────────────────────────
+    // An ecology where a whole type sits at its position limit is not trading,
+    // it is a wall.  Print that before the facts so it cannot be missed.
+    {
+        struct TypeStats {
+            int      n            = 0;
+            double   abs_position = 0.0;
+            double   realized_pnl = 0.0;
+            uint64_t at_limit     = 0;
+        };
+        std::map<std::string, TypeStats> by_type;
+        const auto& at_limit = runner.ticks_at_limit();
+
+        for (IAgent* a : agent_ptrs) {
+            TypeStats& ts = by_type[a->type()];
+            ++ts.n;
+            ts.abs_position += std::abs(static_cast<double>(ledger.net_qty(a->id(), cfg.ticker)));
+            ts.realized_pnl += static_cast<double>(ledger.realized_pnl(a->id(), cfg.ticker));
+            auto it = at_limit.find(a->id());
+            if (it != at_limit.end()) ts.at_limit += it->second;
+        }
+
+        const double ticks = runner.ticks_run() > 0
+            ? static_cast<double>(runner.ticks_run()) : 1.0;
+
+        std::fprintf(stdout, "\nAgent-type summary\n==================\n");
+        std::fprintf(stdout, "| Type                 |  n | Σ|position| | realized P&L | %% ticks at limit |\n");
+        std::fprintf(stdout, "|----------------------|----|-------------|--------------|------------------|\n");
+        for (const auto& [name, ts] : by_type) {
+            std::fprintf(stdout, "| %-20s | %2d | %11.0f | %12.0f | %15.2f%% |\n",
+                         name.c_str(), ts.n, ts.abs_position, ts.realized_pnl,
+                         100.0 * static_cast<double>(ts.at_limit) / (ticks * ts.n));
+        }
+    }
+
     // ── Stylized facts report ─────────────────────────────────────────────────
-    auto report = Report::run(cfg.log_output_path);
+    // Market-maker ids are needed so MM-vs-MM churn can be separated from real
+    // trading; collect them from the live population rather than hard-coding.
+    std::vector<AgentId> mm_ids;
+    for (IAgent* a : agent_ptrs)
+        if (std::strcmp(a->type(), "MarketMakerAS") == 0) mm_ids.push_back(a->id());
+
+    auto report = Report::run(cfg.log_output_path, mm_ids);
     std::fprintf(stdout, "\n%s\n", report.to_text().c_str());
 
     return 0;

@@ -27,7 +27,7 @@ CsvExporter::Stats CsvExporter::export_all(const std::string& bin_path,
     FILE* fs = open_csv(out_dir, "snapshots.csv",
         "tick,mid_price,spread,last_trade_price,realized_vol_s,"
         "realized_vol_m,realized_vol_l,vwap_s,ofi_tick,trade_imbalance,"
-        "momentum,book_imbalance_l1,regime");
+        "momentum,book_imbalance_l1,fundamental_value,regime");
     FILE* fn = open_csv(out_dir, "news.csv",
         "announce_tick,ticker,impact_log_return,duration_ticks,dispersion_sigma");
     FILE* fr = open_csv(out_dir, "regimes.csv",
@@ -56,14 +56,14 @@ CsvExporter::Stats CsvExporter::export_all(const std::string& bin_path,
             }
             else if constexpr (std::is_same_v<T, MarketSnapshotRecord>) {
                 std::fprintf(fs,
-                    "%llu,%lld,%lld,%lld,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%d\n",
+                    "%llu,%lld,%lld,%lld,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.8f,%.6f,%d\n",
                     (unsigned long long)r.tick,
                     (long long)r.mid_price,
                     (long long)r.spread,
                     (long long)r.last_trade_price,
                     r.realized_vol_s, r.realized_vol_m, r.realized_vol_l,
                     r.vwap_s, r.ofi_tick, r.trade_imbalance,
-                    r.momentum, r.book_imbalance_l1, (int)r.regime);
+                    r.momentum, r.book_imbalance_l1, r.fundamental_value, (int)r.regime);
                 ++stats.snapshots;
             }
             else if constexpr (std::is_same_v<T, NewsEventRecord>) {

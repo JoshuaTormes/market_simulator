@@ -35,11 +35,13 @@ public:
     std::optional<LogRecord> next();
 
     bool is_open()  const { return fp_ != nullptr; }
+    uint16_t version() const { return version_; }   // schema version of the open file
     bool at_eof()   const { return at_eof_; }
     uint64_t records_read() const { return records_read_; }
 
 private:
     FILE*    fp_{nullptr};
+    uint16_t version_{kSchemaVersion};
     bool     at_eof_{false};
     uint64_t records_read_{0};
 };

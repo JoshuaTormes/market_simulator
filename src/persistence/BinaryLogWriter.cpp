@@ -72,6 +72,7 @@ void BinaryLogWriter::write_snapshot(const MarketSnapshot& s) {
     r.trade_imbalance       = s.trade_imbalance;
     r.momentum              = s.momentum;
     r.book_imbalance_l1     = s.book_imbalance[0];
+    r.fundamental_value     = s.fundamental_value;
     r.regime                = static_cast<int8_t>(s.regime);
 
     std::lock_guard<std::mutex> lk(mu_);

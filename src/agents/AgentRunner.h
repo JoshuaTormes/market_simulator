@@ -4,6 +4,7 @@
 #include "marketdata/AgentSnapshot.h"
 #include "ledger/PositionLedger.h"
 #include <deque>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,12 @@ public:
                                  double fundamental_value,
                                  Tick now);
 
+    // Diagnostics: how many ticks each agent spent within 5% of its position
+    // limit.  An agent pinned at the limit has stopped choosing and is just a
+    // wall, so this is the cheapest way to spot a dead ecology.
+    const std::map<AgentId, uint64_t>& ticks_at_limit() const { return ticks_at_limit_; }
+    uint64_t ticks_run() const { return ticks_run_; }
+
 private:
     std::vector<IAgent*> agents_;
     uint64_t seed_;
@@ -34,4 +41,7 @@ private:
     // Snapshot history for info_delay_ticks (max kMaxDelay ticks of history).
     static constexpr Tick kMaxDelay = 20;
     std::deque<MarketSnapshot> history_;
+
+    std::map<AgentId, uint64_t> ticks_at_limit_;
+    uint64_t                    ticks_run_ = 0;
 };
