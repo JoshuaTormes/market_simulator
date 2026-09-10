@@ -1,4 +1,6 @@
-// CLI: sim_headless [--seed N] [--duration N] [--output path] [--ticker T] [--process regime|gbm|ou|jump]
+// CLI: sim_headless [--seed N] [--duration N] [--output path] [--ticker T]
+//                   [--process regime|gbm|ou|jump] [--sigma-annual X] [--news-per-day X]
+//                   [--gaussian]
 // Runs the full simulation headlessly (no UI) and writes a binary log.
 // Uses the same component wiring as main.cpp but without SFML/ImGui.
 #include "analysis/Report.h"
@@ -46,6 +48,8 @@ int main(int argc, char** argv) {
             else if (proc == "jump")   cfg.fundamental.type = FundamentalProcessType::JumpDiffusion;
             else                       cfg.fundamental.type = FundamentalProcessType::RegimeSwitching;
         }
+        if (key == "--sigma-annual") cfg.fundamental.sigma_annual = std::stod(argv[i+1]);
+        if (key == "--news-per-day")  cfg.news.events_per_day     = std::stod(argv[i+1]);
         if (key == "--gaussian") cfg.fundamental.gaussian_innovations = true;
     }
 
@@ -77,13 +81,13 @@ int main(int argc, char** argv) {
     publisher.set_initial_mid(static_cast<Price>(cfg.initial_price_ticks));
 
     // ── Fundamental value: selected via --process flag ────────────────────────
-    auto fundamental_ptr = make_fundamental_process(cfg.fundamental,
+    auto fundamental_ptr = make_fundamental_process(cfg.fundamental, cfg.time,
                                                     rng.for_consumer("fundamental"));
     IFundamentalValueProcess& fundamental = *fundamental_ptr;
 
     // ── News process — fully wired from NewsConfig ────────────────────────────
     PoissonNewsProcess::Config news_cfg;
-    news_cfg.lambda           = cfg.news.lambda;
+    news_cfg.lambda           = cfg.news.lambda_per_tick(cfg.time);
     news_cfg.magnitude_scale  = cfg.news.impact_scale;
     news_cfg.student_t_df     = static_cast<int>(cfg.news.impact_df);
     news_cfg.duration_ticks   = static_cast<double>(cfg.news.duration_ticks);

@@ -46,12 +46,12 @@ static AnalysisReport run_one(const SimulationConfig& base_cfg,
     MarketDataPublisher publisher(matching.book());
     publisher.set_initial_mid(static_cast<Price>(cfg.initial_price_ticks));
 
-    auto fundamental_ptr = make_fundamental_process(cfg.fundamental,
+    auto fundamental_ptr = make_fundamental_process(cfg.fundamental, cfg.time,
                                                     rng.for_consumer("fundamental"));
     IFundamentalValueProcess& fundamental = *fundamental_ptr;
 
     PoissonNewsProcess::Config news_cfg;
-    news_cfg.lambda           = cfg.news.lambda;
+    news_cfg.lambda           = cfg.news.lambda_per_tick(cfg.time);
     news_cfg.magnitude_scale  = cfg.news.impact_scale;
     news_cfg.student_t_df     = static_cast<int>(cfg.news.impact_df);
     news_cfg.duration_ticks   = static_cast<double>(cfg.news.duration_ticks);

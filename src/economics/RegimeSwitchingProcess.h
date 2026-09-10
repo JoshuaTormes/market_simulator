@@ -22,19 +22,23 @@ public:
         // Degrees of freedom for Student-t innovations. ν=3.5 → tail index α≈3.5 ∈ [1.8,6].
         // Innovations are normalized to unit variance so calibrated sigma values are preserved.
         double nu = 3.5;
-        // All μ = 0: log-value is a martingale. No compensatory drift hack needed;
-        // stylized facts (fat tails, clustering) must emerge from market microstructure.
+        // All μ = 0: the log-value is a martingale.  Stylized facts must emerge
+        // from market microstructure, not from a drift term.
+        // These sigmas are placeholders for direct unit-test construction; the
+        // real values come from FundamentalConfig via the factory, which
+        // derives one per-tick sigma from sigma_annual and scales it by the
+        // per-regime multiplier.  Keep the two in sync only through the factory.
         std::array<Regime, kRegimes> regimes = {{
-            {0.0,  0.003},  // 0: low_vol  (quiet martingale random walk)
-            {0.0,  0.010},  // 1: high_vol (elevated vol martingale)
-            {0.0,  0.025}   // 2: crash    (spike in vol — microstructure creates skew via stops)
+            {0.0,  1.24e-4},  // 0: quiet    (σ_annual 30% at 1 tick = 1 s)
+            {0.0,  3.10e-4},  // 1: elevated (2.5x)
+            {0.0,  7.44e-4}   // 2: crash    (6x)
         }};
-        // Row i = transition probabilities from regime i.
-        // Steady-state: ~86% low_vol, ~13% high_vol, ~0.6% crash.
+        // Row i = transition probabilities from regime i.  Expected duration
+        // is 1/(1-p_ii): 100 / 33 / 6.7 ticks.
         std::array<std::array<double, kRegimes>, kRegimes> trans = {{
-            {0.990, 0.007, 0.003},  // low_vol  → mostly stays, some to high_vol/crash
-            {0.050, 0.940, 0.010},  // high_vol → recovers 5%/tick, some to crash
-            {0.350, 0.300, 0.350}   // crash    → fast recovery (avg ~1.5 ticks)
+            {0.990, 0.007, 0.003},
+            {0.020, 0.970, 0.010},
+            {0.050, 0.100, 0.850}
         }};
         int  initial_regime       = 0;
         // Emergence test flag: Gaussian innovations prove fat tails come from microstructure.
@@ -44,6 +48,7 @@ public:
     RegimeSwitchingProcess(Config cfg, std::mt19937_64 rng);
 
     void   step(Tick now, double dt) override;
+    void   apply_shock(double log_return) override { log_s_ += log_return; }
     double current_value() const override;
     double current_drift() const override { return cfg_.regimes[regime_].mu; }
     double current_vol()   const override { return cfg_.regimes[regime_].sigma; }

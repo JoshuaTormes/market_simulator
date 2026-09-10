@@ -10,6 +10,11 @@ public:
     // Advance one time step.
     virtual void step(Tick now, double dt) = 0;
 
+    // Apply an exogenous shock of `log_return` to the level.  A public news
+    // announcement moves the fundamental itself; without this the news only
+    // moved agents' orders, so the "information" carried no information.
+    virtual void apply_shock(double log_return) = 0;
+
     // Current fundamental value (in the same double units as s0).
     virtual double current_value() const = 0;
 

@@ -4,6 +4,7 @@
 //   S_{t+dt} = θ + (S_t − θ) · exp(−κ dt) + σ · sqrt((1 − exp(−2κ dt)) / (2κ)) · Z
 // Reference: Uhlenbeck & Ornstein (1930); Vasicek (1977) for applications.
 #include "IFundamentalValueProcess.h"
+#include <cmath>
 #include <random>
 
 class OUProcess : public IFundamentalValueProcess {
@@ -18,6 +19,9 @@ public:
     OUProcess(Config cfg, std::mt19937_64 rng);
 
     void   step(Tick now, double dt) override;
+    // Level process: a log-return shock scales the level multiplicatively,
+    // so the shock has the same meaning as in the log processes.
+    void   apply_shock(double log_return) override { s_ *= std::exp(log_return); }
     double current_value() const override { return s_; }
     double current_drift() const override { return kappa_ * (theta_ - s_); }
     double current_vol()   const override { return sigma_; }

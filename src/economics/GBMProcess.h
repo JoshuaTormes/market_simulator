@@ -16,6 +16,7 @@ public:
     GBMProcess(Config cfg, std::mt19937_64 rng);
 
     void   step(Tick now, double dt) override;
+    void   apply_shock(double log_return) override { log_s_ += log_return; }
     double current_value() const override;
     double current_drift() const override { return mu_; }
     double current_vol()   const override { return sigma_; }

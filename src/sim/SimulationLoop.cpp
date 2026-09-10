@@ -1,6 +1,6 @@
 // Tick order (plan §Phase6):
 //  1. fundamental_process.step(dt)
-//  2. news_process.step(now) → EventBus
+//  2. news_process.step(now) → EventBus + fundamental.apply_shock(impact)
 //  3. agent_runner.run(prev_snap) → actions
 //  4. risk_gate.filter(actions) → filtered
 //  5. matching_engine.submit(filtered)
@@ -96,6 +96,12 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
 
     // 2b. Publish any UI-injected news (thread-safe queue).
     flush_pending_news();
+
+    // A public announcement is information about the asset, so it moves the
+    // fundamental itself.  Applied here, after step(), so the shock lands on
+    // the same tick the agents learn about it.
+    for (const auto& nev : news_events)
+        fundamental_.apply_shock(nev.impact_log_return);
 
     // Log news events.
     if (log_writer_) {

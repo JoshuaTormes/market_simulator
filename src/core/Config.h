@@ -1,8 +1,33 @@
 #pragma once
 #include "Types.h"
 #include "Clock.h"
+#include <cmath>
 #include <string>
 #include <cstdint>
+
+// ── Time scale ─────────────────────────────────────────────────────────────
+// A tick is a fixed slice of trading time.  Every quantity with a time
+// dimension — volatility, news arrival rate, agent horizons — is derived from
+// these three numbers, so the model has one coherent clock instead of a
+// per-component guess.  Changing seconds_per_tick rescales the whole model
+// consistently.
+struct TimeScale {
+    double seconds_per_tick = 1.0;       // 1 tick = 1 second of trading
+    double seconds_per_day  = 23400.0;   // 6.5 h US equity session
+    double trading_days     = 252.0;
+
+    double ticks_per_day()  const { return seconds_per_day / seconds_per_tick; }
+    double ticks_per_year() const { return ticks_per_day() * trading_days; }
+
+    // Per-tick volatility implied by an annualized volatility, under
+    // square-root-of-time scaling.  σ_annual = 30% → σ_tick ≈ 1.24e-4.
+    double per_tick_vol(double sigma_annual) const {
+        return sigma_annual / std::sqrt(ticks_per_year());
+    }
+
+    // Convert a per-day rate (e.g. news announcements per session) to per tick.
+    double per_tick_rate(double per_day) const { return per_day / ticks_per_day(); }
+};
 
 // ── Per-agent-type population ranges ──────────────────────────────────────
 
@@ -104,23 +129,34 @@ enum class FundamentalProcessType { GBM, OU, JumpDiffusion, RegimeSwitching };
 struct FundamentalConfig {
     FundamentalProcessType type = FundamentalProcessType::RegimeSwitching;
     double initial_value        = 100.0;
-    // GBM / per-regime shared drift+vol
-    double mu                   = 0.0;
-    double sigma                = 0.01;
-    // OU
+
+    // Annualized volatility of the fundamental — the one volatility knob.
+    // 30% is the typical range for a large-cap equity.  The per-tick sigma
+    // used by every process is derived from this via TimeScale, so the value
+    // no longer depends on what a "tick" happens to mean.
+    double sigma_annual        = 0.30;
+    // Drift of the log fundamental, per year.  Zero: a martingale.  Any
+    // non-zero value here is a claim about expected returns, not a fix for a
+    // process that collapses.
+    double mu_annual           = 0.0;
+
+    // OU only: mean-reversion speed per tick, and long-run mean.
     double kappa                = 0.05;
     double theta                = 100.0;
-    // Jump-diffusion
-    double jump_intensity       = 0.005;
+    // Jump-diffusion only: jumps per day and log-jump size.
+    double jumps_per_day        = 2.0;
     double jump_mean            = 0.0;
     double jump_sigma           = 0.03;
-    // Regime switching — defaults match RegimeSwitchingProcess internal calibration
+
+    // Regime switching.
     double nu                   = 3.5;    // Student-t degrees of freedom for innovations
     bool   gaussian_innovations = false;  // if true, use N(0,1) instead of Student-t
-    double regime_sigma[3]      = {0.003, 0.010, 0.035};  // low_vol, high_vol, crash
-    double regime_mu[3]         = {0.0,   0.0,   0.0};    // pure martingale in all regimes
-    // Transition matrix (row = from, col = to)
-    // high_vol: avg 33 ticks (1/0.030); crash: avg 6.7 ticks (1/0.150)
+    // Regimes are multipliers on the base per-tick sigma, not absolute levels:
+    // quiet / elevated / crash.  A crash is 6x normal volatility, not a
+    // different asset.
+    double regime_vol_mult[3]   = {1.0, 2.5, 6.0};
+    // Transition matrix (row = from, col = to).  Expected duration is
+    // 1/(1-p_ii) ticks: 100 / 33 / 6.7 at these values.
     double regime_trans[3][3]   = {
         {0.990, 0.007, 0.003},
         {0.020, 0.970, 0.010},
@@ -131,11 +167,20 @@ struct FundamentalConfig {
 // ── News process config ────────────────────────────────────────────────────
 
 struct NewsConfig {
-    double lambda               = 0.002;  // events per tick (reduced to limit return ACF)
+    // Public announcements per trading session.  8/day is roughly what a
+    // liquid single name sees (earnings, guidance, sector and macro prints).
+    double events_per_day       = 8.0;
     double impact_df            = 3.0;    // Student-t degrees of freedom for magnitude
-    double impact_scale         = 0.02;   // scale of the t-distribution
+    // Scale of the announcement's log-impact on the fundamental.  0.4% with
+    // t(3) tails puts a typical headline at a few tens of basis points and a
+    // rare one at a few percent — the size of a real earnings surprise.
+    double impact_scale         = 0.004;
     int    duration_ticks       = 5;      // ticks of sustained reactor firing per event
     double dispersion           = 0.5;    // cross-agent heterogeneity
+
+    double lambda_per_tick(const TimeScale& ts) const {
+        return ts.per_tick_rate(events_per_day);
+    }
 };
 
 // ── Root simulation config ─────────────────────────────────────────────────
@@ -144,7 +189,7 @@ struct SimulationConfig {
     uint64_t  seed              = 42;
     uint64_t  max_ticks         = 100'000;
     ClockMode clock_mode        = ClockMode::AsFastAsPossible;
-    double    seconds_per_tick  = 0.001;
+    TimeScale time;                          // 1 tick = 1 s of trading by default
     double    accel_factor      = 1.0;
     std::string ticker          = "AAPL";
     double    tick_size         = 0.01;
