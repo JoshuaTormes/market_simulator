@@ -26,6 +26,13 @@ public:
         Qty    parent_min     = 200;    // Pareto support is truncated to
         Qty    parent_max     = 3000;   // [parent_min, parent_max]
         double parent_alpha   = 1.5;    // Pareto tail exponent for parent size
+        // Inventory scale of the parent-side tilt, in lots.  A desk works
+        // client orders and passes the position through; with no client in the
+        // simulator a fair coin lets the desk's own book random-walk into the
+        // risk limit, where the gate rejects one side and the desk becomes a
+        // permanent directional push.  Tilting which parents it accepts against
+        // its current book is the stand-in for that flow being two-sided.
+        double q_scale        = 1500.0;
         // Execution schedule.
         int    total_slices   = 20;     // children per parent
         int    ticks_between  = 5;      // ticks between children
@@ -49,7 +56,6 @@ private:
 
     Params p_;
     std::bernoulli_distribution arrival_;
-    std::bernoulli_distribution side_coin_;
     std::uniform_real_distribution<double> u_;
 
     // Current parent being worked; remaining_ == 0 means idle.

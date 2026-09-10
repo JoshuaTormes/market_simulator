@@ -59,10 +59,11 @@ std::vector<Action> InformedTraderKyle::on_market_data(const AgentSnapshot& snap
     // Without this the trader keeps sending orders the risk gate rejects while
     // a long-lived gap persists, and spends the rest of the run pinned at the
     // limit with no capacity left for the next signal.
-    const double q_max = static_cast<double>(rl_.max_position);
+    const double q_soft = static_cast<double>(rl_.max_position)
+                        * std::clamp(p_.q_soft_frac, 0.05, 1.0);
     const bool   grows = (q == 0.0) || ((gap > 0.0) == (q > 0.0));
-    if (grows && q_max > 0.0)
-        size *= std::max(0.0, 1.0 - std::abs(q) / q_max);
+    if (grows && q_soft > 0.0)
+        size *= std::max(0.0, 1.0 - std::abs(q) / q_soft);
 
     if (size < 1.0) return {};
     const Qty qty = static_cast<Qty>(

@@ -25,11 +25,11 @@ NewsReactor::NewsReactor(AgentId id, const std::string& ticker,
                                     static_cast<double>(rl_.max_position));
             Qty qty = std::max(Qty{1}, static_cast<Qty>(std::round(scale)));
 
-            // Fire once per tick for the full event duration — creates sustained
-            // directional OFI that drives vol clustering (Facts 3 & 4).
-            int n_ticks = std::max(1, static_cast<int>(std::round(ev.duration_ticks)));
-            for (int dt = 0; dt < n_ticks; ++dt)
-                queue_.push_back({ start + static_cast<Tick>(dt), side, qty });
+            // One reaction, at one tick, dispersed inside the event window.
+            std::uniform_real_distribution<double> spread_u(
+                0.0, std::max(1.0, ev.duration_ticks));
+            const Tick fire = start + static_cast<Tick>(std::floor(spread_u(rng_)));
+            queue_.push_back({ fire, side, qty });
         });
     }
 }

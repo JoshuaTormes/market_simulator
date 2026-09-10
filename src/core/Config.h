@@ -39,13 +39,19 @@ struct ParamRange {
 
 struct MarketMakerParams {
     int count  = 3;
-    int mm_qty = 100;                       // lots per quote side at zero inventory
+    // 200 lots per side: quoted depth has to exceed a typical aggressive order
+    // (institutional children cap at 200) or one market order empties the book
+    // and the mid stops existing until the next requote.
+    int mm_qty = 200;
     // Quote geometry in price ticks — the book is integer, so the maker is too.
     double half_spread_min_ticks = 1.0;
     double vol_mult              = 1.0;
     double inventory_skew_ticks  = 4.0;
     double adverse_sel_ticks_per_lot = 0.01;
-    double q_soft                = 300.0;   // position where the growing side stops quoting
+    // 600 lots = three full-size quotes: the maker must be able to absorb a few
+    // complete fills before it withdraws a side, or the book goes one-sided by
+    // construction rather than because liquidity ran out.
+    double q_soft                = 600.0;
     // Belief dynamics.
     double lambda_kyle  = 0.06;
     double belief_decay = 0.02;
@@ -72,8 +78,9 @@ struct InformedTraderParams {
     double margin_ticks      = 1.0;   // gap must beat half-spread by this much
     int    max_order_size    = 200;
     int    unwind_qty        = 50;    // lots returned per tick once the gap is closed
-    int    max_position      = 2000;
+    int    max_position      = 4000;
     double pareto_alpha      = 1.5;   // Pareto tail exponent for order sizing
+    double q_soft_frac       = 0.6;   // own risk budget as a fraction of max_position
 };
 
 struct MomentumParams {
@@ -106,6 +113,7 @@ struct InstitutionalParams {
     int    parent_min     = 200;    // Pareto parent size, truncated to
     int    parent_max     = 3000;   // [parent_min, parent_max]
     double parent_alpha   = 1.5;    // Pareto tail exponent for parent size
+    double q_scale        = 1500.0; // inventory scale of the parent-side tilt
     int    slices         = 20;
     int    ticks_between  = 5;
     double pareto_alpha   = 1.5;    // Pareto tail exponent for child order sizing
@@ -125,9 +133,11 @@ struct StopLossParams {
 };
 
 struct NewsReactorParams {
-    // lag_range = [0,1]: short lags so reactors fire within 1 tick of news.
-    // Each reactor fires once per tick for the full event duration (duration_ticks),
-    // creating sustained directional OFI that drives vol clustering (Facts 3 & 4).
+    // lag_range = [0,1]: short lags, so the cohort starts reacting within a tick
+    // of the announcement.  Each reactor then fires exactly once, at a moment
+    // drawn inside the event window — the heterogeneity across the 8 reactors
+    // is what spreads the impact over several ticks, not a repeated order from
+    // each of them.
     int count = 8;
     int base_qty = 50;                             // lots per reaction tick for a typical headline
     ParamRange<double> lag_range      = {0, 1};

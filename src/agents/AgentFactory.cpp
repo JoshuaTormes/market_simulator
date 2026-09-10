@@ -79,6 +79,7 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
         p.max_order_size   = static_cast<Qty>(cfg_.informed_traders.max_order_size);
         p.unwind_qty       = static_cast<Qty>(cfg_.informed_traders.unwind_qty);
         p.pareto_alpha     = cfg_.informed_traders.pareto_alpha;
+        p.q_soft_frac      = cfg_.informed_traders.q_soft_frac;
 
         RiskLimits rl;
         rl.max_position = static_cast<Qty>(cfg_.informed_traders.max_position);
@@ -129,6 +130,7 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
         p.parent_min     = static_cast<Qty>(cfg_.institutionals.parent_min);
         p.parent_max     = static_cast<Qty>(cfg_.institutionals.parent_max);
         p.parent_alpha   = cfg_.institutionals.parent_alpha;
+        p.q_scale        = cfg_.institutionals.q_scale;
         p.total_slices   = cfg_.institutionals.slices;
         p.ticks_between  = cfg_.institutionals.ticks_between;
         p.pareto_alpha   = cfg_.institutionals.pareto_alpha;

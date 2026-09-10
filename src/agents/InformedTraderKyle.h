@@ -25,7 +25,13 @@ public:
         double margin_ticks     = 1.0;  // gap must beat half-spread by this much
         Qty    max_order_size   = 200;  // cap per aggressive order
         Qty    unwind_qty       = 50;   // lots returned per tick when the gap is closed
-        double pareto_alpha     = 1.5;  // heavy-tailed size multiplier (0 = pure Kyle)
+        double pareto_alpha     = 1.5;
+        // Own risk appetite as a fraction of the hard position limit.  The
+        // limit belongs to the broker; the trader's own budget is smaller, and
+        // sizing against it is what keeps the trader off the gate — an agent
+        // pinned at the gate has stopped discovering anything, because the
+        // rejected side of its flow carries no information into the book.
+        double q_soft_frac      = 0.6;  // heavy-tailed size multiplier (0 = pure Kyle)
     };
 
     InformedTraderKyle(AgentId id, const std::string& ticker,

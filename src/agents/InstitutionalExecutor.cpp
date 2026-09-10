@@ -10,7 +10,6 @@ InstitutionalExecutor::InstitutionalExecutor(AgentId id, const std::string& tick
     : AgentBase(id, ticker, std::move(rng), rl, lp, ip)
     , p_(p)
     , arrival_(std::clamp(p.arrival_lambda, 0.0, 1.0))
-    , side_coin_(0.5)
     , u_(0.0, 0.9999)
 {}
 
@@ -32,7 +31,10 @@ std::vector<Action> InstitutionalExecutor::on_market_data(const AgentSnapshot& s
     // idle tick so the arrival process is memoryless in tick time.
     if (remaining_ <= 0) {
         if (!arrival_(rng_)) return {};
-        side_        = side_coin_(rng_) ? Side::Buy : Side::Sell;
+        // Tilt the parent side against the book the desk is already carrying.
+        const double qs = (p_.q_scale > 0.0) ? p_.q_scale : 1.0;
+        const double p_buy = 0.5 - 0.5 * std::tanh(snap.own_inventory / qs);
+        side_        = (u_(rng_) < p_buy) ? Side::Buy : Side::Sell;
         remaining_   = draw_parent_qty();
         slices_done_ = 0;
         next_tick_   = now;
