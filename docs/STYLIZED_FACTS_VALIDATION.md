@@ -1,265 +1,186 @@
-# Arquitetura: Validação de Fatos Estilizados (Fase 9)
+# Validação: Price Discovery e Fatos Estilizados
 
-## Visão Geral
+## Ordem das perguntas
 
-O pipeline de validação verifica que o simulador reproduz os 8 fatos estilizados documentados em mercados financeiros reais. A análise é executada pós-simulação sobre o log binário e também inline no CLI `sim_headless`.
+Antes de perguntar se os retornos têm caudas gordas, é preciso perguntar se o preço negociado tem
+alguma relação com o valor fundamental. Um mercado onde o mid não segue o fundamental pode passar
+em fatos estilizados por acidente — ruído tem caudas também. Por isso a validação é feita em duas
+camadas:
+
+1. **Price discovery** — o mid rastreia o valor latente `V`? O book fica de dois lados? Algum tipo
+   de agente está parado no limite de posição, virando uma parede em vez de negociar?
+2. **Fatos estilizados** — dado que o preço é formado, ele tem as propriedades estatísticas de um
+   mercado real?
+
+Nenhuma das duas camadas é decidida em uma seed. `sim_calibrate` roda um ensemble e reporta
+média ± desvio e a fração de seeds que passa cada critério.
 
 ```text
-logs/run.bin
+logs/run.bin  (schema v3: o snapshot carrega fundamental_value)
     │
     ▼
-BinaryLogReader
-    │  extrai MarketSnapshotRecord
-    ▼
-Report::run()
-    ├── log_returns(mid_prices)      → vector<double> rets
-    ├── AcfComputer::compute(rets)   → ACF[0..20]
-    ├── AcfComputer::compute_abs(rets) → ACF(|r|)[0..20]
-    ├── HillEstimator::estimate_abs  → Hill α̂
-    ├── FlashCrashDetector::detect   → n_crashes (informativo)
-    └── AnalysisReport               → 8 StyleResult + texto/CSV
+BinaryLogReader  →  Report::run(path, mm_ids)
+    ├── log_returns(mid)              → curtose, skew, ACF, Hill
+    ├── log(mid_t / V_t)              → gap, meia-vida, corr por horizonte
+    ├── spread > 0                    → book de dois lados, CoV do spread
+    └── maker/taker ∈ mm_ids          → volume MM-vs-MM
 ```
+
+O `mid` nunca é ancorado no fundamental. Quando um lado do book esvazia, o publisher carrega o
+último mid **formado pelo mercado** (`prev_valid_mid_`); escrever `V` ali criaria price discovery
+por construção e a métrica mediria a si mesma.
 
 ---
 
-## Os 8 Fatos Estilizados
+## Camada 1 — Price discovery (10 seeds × 50k ticks)
 
-### Fato 1 — Fat Tails (excess kurtosis > 1.0)
+| Métrica | Valor | Critério | Seeds |
+|---|---|---|---|
+| corr(rV, r_mid), h=1 | 0,088 ± 0,049 | — | — |
+| corr(rV, r_mid), h=5 | 0,303 ± 0,041 | — | — |
+| corr(rV, r_mid), h=20 | 0,641 ± 0,026 | > 0,30 | 10/10 |
+| corr(rV, r_mid), h=100 | 0,859 ± 0,021 | > 0,50 | 10/10 |
+| std(log(mid/V)) | 0,0018 ± 0,0004 | < 0,01 | 10/10 |
+| meia-vida do gap | 27,2 ± 13,6 ticks | < 50 | 9/10 |
+| book de dois lados | 0,972 ± 0,009 | alto | — |
+| retornos exatamente zero | 0,207 ± 0,009 | — | — |
+| volume MM-vs-MM | 0,000 | < 0,05 | 10/10 |
+| pior tipo no limite de posição | 0,000 | < 0,05 | 10/10 |
 
-Retornos financeiros têm caudas muito mais pesadas que a distribuição normal. O kurtosis em excesso (kurtose − 3) de mercados reais tipicamente fica entre 5 e 50+.
+A correlação crescer com o horizonte é o resultado esperado, não um defeito: em 1 tick o retorno do
+mid é dominado por microestrutura (bounce, granularidade de 1 tick de preço, chegada discreta de
+ordens) e o sinal fundamental só emerge quando acumulado. O erro de precificação é estacionário e
+volta a zero em ~27 ticks, o que é o que "descoberta de preço" significa operacionalmente.
 
-**Origem no simulador:** Inovações Student-t(ν=3.5) no `RegimeSwitchingProcess`. Com ν < 4, o quarto momento é infinito, produzindo eventos extremos frequentes. Regime crash (σ=0.025) amplifica as caudas.
-
-**Resultado de referência:** kurtosis = 64.9 ✅
-
----
-
-### Fato 2 — Return ACF ≈ 0 (|ACF(r, lag=1)| < 0.10)
-
-Retornos consecutivos são essencialmente não-correlacionados ("hipótese de mercado eficiente" fraca).
-
-**Desafio de calibração:** Qualquer fonte de pressão direcional persistente por >1 tick cria ACF positivo. Fontes identificadas durante a Fase 9:
-
-```text
-Causa                          │ Efeito no ACF
-───────────────────────────────┼──────────────────────────────
-NewsReactor lag_range = {0,10} │ +0.05 por lag adicional
-InformedTrader (3 agentes)     │ +0.002 (marginal)
-Fundamental drift para zero    │ −0.10 (negativo, contamina)
-```
-
-**Causa raiz:** O processo fundamental (`RegimeSwitchingProcess`) com `mu_crash = -0.010` acumula drift esperado de:
-```
-E[Δlog_s/tick] = 0.006 × (−0.010 − 0.5×0.025²)
-               + 0.863 × (0 − 0.5×0.003²)
-               + 0.131 × (0 − 0.5×0.010²)
-               ≈ −7.2×10⁻⁵ por tick
-```
-Sobre 50k ticks: cumulativo = −3.6, preço final esperado = e^(−3.6) × inicial ≈ 2.7% do inicial. Com seed=42, o preço colapsou de $101 para $0.37 no final da simulação, criando 38.8% de retornos zero nos últimos ticks e ACF = −0.10.
-
-**Fix aplicado:** `mu_low = mu_high = +7.3×10⁻⁵` em `RegimeSwitchingProcess.h`:
-```cpp
-std::array<Regime, kRegimes> regimes = {{
-    {+7.3e-5, 0.003},  // low_vol:  drift compensatório
-    {+7.3e-5, 0.010},  // high_vol: drift compensatório
-    {-0.010,  0.035}   // crash:    drift negativo + sigma elevado
-}};
-```
-Verificação: `π_low×μ_low + π_high×μ_high + π_crash×(μ_crash−0.5×σ_crash²) ≈ 0`
-
-**Resultado ensemble:** |ACF(r, lag=1)| = 0.058 (100% pass rate) ✅
+**Pior tipo no limite** é a métrica de ecologia viva. Um tipo de agente que passa a simulação
+encostado no seu limite de posição não está escolhendo nada — o RiskGate rejeita um lado e o resto
+do fluxo dele vira empurrão direcional espúrio. Na primeira rodada de ensemble apenas 20% das seeds
+mantinham todos os tipos abaixo de 5%; hoje são 10/10 em 0%.
 
 ---
 
-### Fato 3 — Volatility Clustering (ACF(|r|, lag=2) > 0.05)
+## Camada 2 — Os 8 fatos estilizados
 
-Grandes retornos (em módulo) tendem a ser seguidos por grandes retornos — a volatilidade se agrupa em clusters. Mede-se pelo ACF dos retornos absolutos.
+Ensemble de 10 seeds × 50k ticks (`ensemble.txt` na pasta da spec):
 
-**Origem no simulador:** Regime-switching cria persistência de volatilidade. No regime `high_vol` (σ=0.010, P[stay]=0.97), 97% de chance de continuar com alta volatilidade no próximo tick.
+| # | Fato | Média | Threshold | Seeds |
+|---|---|---|---|---|
+| 1 | Caudas gordas (curtose em excesso) | 81,12 ± 87,71 | > 1,0 | 10/10 |
+| 2 | ACF de retorno ≈ 0 (lags 1 e 2) | 0,149 ± 0,006 | < 0,05 | **0/10** |
+| 3 | Clustering de volatilidade, ACF(\|r\|, 1) | 0,084 ± 0,010 | > 0,05 | 10/10 |
+| 4 | Memória longa de vol, média ACF(\|r\|, 1..10) | 0,055 ± 0,008 | > 0,02 | 10/10 |
+| 5 | Assimetria ganho-perda, skew < 0 | −0,348 ± 1,493 | < 0 | **6/10** |
+| 6 | Índice de cauda de Hill α | 4,59 ± 0,47 | ∈ [1,8; 6,0] | 10/10 |
+| 7 | Variação do spread, CoV | 0,228 ± 0,029 | > 0,08 | 10/10 |
+| 8 | Clustering de OFI, ACF(\|OFI\|, 1) | 0,165 ± 0,008 | > 0,03 | 10/10 |
 
-**Por que lag=2 e não lag=1?**
+**Total: 6,6/8 em média, 82,5% dos pares (fato, seed).**
 
-Os agentes observam `prev_snap_` (1-tick de lag). Quando o fundamental entra no regime crash no tick T, o OFI de venda dos reatores só chega ao book no tick T+1 (os agentes ainda não viram o crash em T). O preço reage em T+1, mas o book no tick T já estava ancorado nas cotações stale do MM (calculadas com o mid do tick T-1). Resultado: o retorno extremo de T→T+1 é seguido de outro retorno extremo em T+1→T+2 (reversão ou continuação do crash), mas o par (T, T+1) visto no lag=1 inclui um retorno T→T+1 que parece "de fundo normal" seguido do crash. Isso cria sistematicamente ACF(|r|, lag=1) ≈ −0.037 (negativo) e ACF(|r|, lag=2) ≈ +0.10 (positivo) onde o clustering efetivamente aparece.
+Diagnósticos que acompanham: Ljung-Box Q(10) = 2820 ± 318, ACF do sinal de trade em lag 1 =
+0,311 ± 0,010 (faixa alvo 0,10–0,40), correlação vol-volume = 0,099 ± 0,009, ~239 mil trades por
+rodada.
 
-```text
-tick T:   fundamental entra em crash; agentes ainda veem prev_snap (normal)
-tick T+1: agentes reagem ao crash (observam snap_T); retorno extremo começa
-tick T+2: continuação/reversão do crash ainda sustenta alta vol
-→ par (T+1, T+2): ambos high-vol → ACF(|r|, lag=1 do par) = lag=2 da série original
-```
+### De onde vem cada fato
 
-**Fix em `Report.cpp`:** Fact 3 verifica `acf_abs.acf[2]` em vez de `acf_abs.acf[1]`.
-
-**Resultado ensemble:** ACF(|r|, lag=2) = 0.097 (80% pass rate) ✅
-
----
-
-### Fato 4 — Long Memory of Volatility (mean ACF(|r|, lags 1..10) > 0.02)
-
-A volatilidade exibe memória de longa duração — o ACF decai lentamente, não exponencialmente.
-
-**Origem no simulador:** Combinação de regime-switching de alta persistência (P[high_vol]=0.970 por tick → média de ~33 ticks em high_vol) com o estado `low_vol` extremamente persistente (P=0.990 → média de 100 ticks). O regime crash também sustenta 6-7 ticks antes de reverter, criando eventos de vol elevada que dominam a média do ACF.
-
-**Resultado ensemble:** mean ACF(|r|) lags 1–10 = 0.072 (90% pass rate) ✅
-
----
-
-### Fato 5 — Gain-Loss Asymmetry (skew(r) < 0)
-
-Quedas são em média maiores e mais rápidas do que subidas. A distribuição de retornos tem cauda esquerda mais pesada.
-
-**Origem no simulador:** Regime crash com `mu_crash = -0.010` (drift negativo de 1%/tick) combinado com σ=0.035. Produz retornos extremamente negativos durante crashes.
-
-**Problema arquitetural — excluído por design:**
-
-`InstitutionalExecutor` (count=1, side=Buy via `i%2==0` em AgentFactory) executa 500 shares compradoras em fatias TWAP ao longo de toda a simulação, criando pressão compradora sistemática. Isso produz skewness > 0 em ≈70% das seeds, fazendo Fato 5 passar apenas em 30% do ensemble.
-
-Tentativas de fix fracassaram sem quebrar outros fatos:
-- count=0: kurtosis explodia para 617, skewness +2.3 (sem institutional, stop-loss cascades dominam)
-- side=Sell: recuperação pós-crash cria retornos positivos extremos, piorando a assimetria
-
-**Resultado ensemble:** skewness médio = +0.222 (30% pass rate) — **Fato excluído por design.**
+- **1, 6 — caudas.** Não vêm das innovations Student-t do fundamental. Vêm do fatiamento de ordens
+  (`InstitutionalExecutor`, parents Pareto α=1,5 fatiados em filhos Pareto) e das cascatas de
+  `StopLossCluster`. O teste de emergência abaixo é a evidência.
+- **3, 4 — clustering e memória.** Regime-switching persistente (duração esperada 100 / 33 / 6,7
+  ticks) mais o feedback do inventário do market maker: uma sequência de execuções de um lado
+  alarga o spread cotado, o que amplifica o próximo retorno.
+- **7 — spread.** O `MarketMakerAS` cota `half = half_min + vol_mult·σ_ticks + λ_adv·|OFI|`, então o
+  spread responde a volatilidade e a toxicidade de fluxo. CoV medido só em ticks com book de dois lados.
+- **8 — OFI.** Oito `NewsReactor` reagindo dentro da janela do evento, mais o informado de Kyle
+  negociando o gap de precificação de forma persistente até fechá-lo.
 
 ---
 
-### Fato 6 — Hill Tail Index α ∈ [1.8, 6.0]
+## Falhas medidas (não corrigidas por threshold)
 
-A distribuição de retornos segue uma lei de potência nas caudas: `P(|r| > x) ~ x^{-α}`. O índice α para mercados reais tipicamente cai em [1.8, 6.0] (Mandelbrot, Lux).
+### Fato 2 — ACF de retorno ≈ 0 falha em 0/10 seeds, a 0,149
 
-**Estimador Hill:**
-```
-α̂ = (1/k × Σᵢ₌₁ᵏ log(X_(n-i+1)/X_(n-k)))⁻¹
-```
-onde `X_(1) ≤ ... ≤ X_(n)` são os `|retornos|` ordenados e k = 10% dos dados.
+A autocorrelação não é um bug: é o preço de ter fatiamento de ordens. `ACF(sinal de trade, 1) =
+0,31` é ele mesmo um fato estilizado (Lillo-Mike-Farmer) e é o que produz as caudas gordas. Como o
+market maker move a crença com o fluxo (`belief_ += λ_kyle · OFI`), fluxo autocorrelacionado vira
+retorno autocorrelacionado.
 
-**Origem no simulador:** Student-t(ν=3.5) no fundamental: α da distribuição t(ν) = ν = 3.5. O estimador Hill multi-k usa k=n^{0.35}...n^{0.65} e reporta a média para reduzir variância.
+Varredura de `lambda_kyle` (o único parâmetro que controla diretamente esse repasse):
 
-**Resultado ensemble:** α̂ = 4.016 (90% pass rate) ✅
+| `lambda_kyle` | ACF de retorno | Clustering (Fato 3) | corr(h=100) | Meia-vida do gap |
+|---|---|---|---|---|
+| 0,00 | passa em 75% das seeds | 0,011 | 0,41 | 377 ticks |
+| 0,01 | passa em 75% das seeds | 0,023 | 0,62 | 253 ticks |
+| **0,06** | **0,149** | **0,084** | **0,86** | **27 ticks** |
+| 0,12 | 0,21 | — | — | — |
+| 0,20 | 0,29 | — | — | — |
+| 0,35 | 0,35 | — | — | — |
 
----
+Zerar o repasse compra o Fato 2 e paga com o Fato 3, o Fato 4 e o price discovery — o mid deixa de
+seguir o fundamental porque o maker deixa de aprender com o fluxo. `0,06` é o melhor compromisso
+conjunto encontrado dentro das faixas economicamente justificáveis. O fato fica registrado como
+falha; mexer no threshold seria redefinir o fato para que ele passe.
 
-### Fato 7 — Spread Variation (CoV(spread) > 0.08)
+### Fato 5 — assimetria ganho-perda passa em 6/10 seeds
 
-O bid-ask spread não é constante — varia ao longo do tempo (correlacionado com volatilidade).
-
-**Origem no simulador:** `MarketMakerAS` usa spread adaptativo:
-```cpp
-double min_half = std::max(1.0, rv / kVolBaseline);  // kVolBaseline = 0.003
-spread_half = std::max(spread_half_AS, min_half);
-```
-Em regime `crash` (rv ≈ 0.025): min_half ≈ 8.3 ticks. Em `low_vol` (rv ≈ 0.003): min_half = 1.0. O CoV é calculado apenas sobre ticks com livro two-sided (spread > 0).
-
-**Resultado ensemble:** CoV(spread) = 0.769 (100% pass rate) ✅
-
----
-
-### Fato 8 — OFI Clustering (ACF(|OFI|, lag=1) > 0.03)
-
-O Order Flow Imbalance (diferença entre pressão compradora e vendedora) é autocorrelacionado — a toxicidade do fluxo se agrupa.
-
-**Origem no simulador:** 8 `NewsReactor` disparam uma order de mercado por tick durante todo o `duration_ticks` do evento (5 ticks), criando fluxo direcional sustentado. `InformedTraderKyle` (×2) e `StopLossCluster` (×6) amplificam o OFI durante crashes.
-
-**Parâmetros críticos para não quebrar este fato:**
-- `base_qty = 50` (8×50=400 < 600 MM depth — book depletion congela o mid e suprime OFI)
-- `lag_range = {0, 1}` (lags maiores espalham o OFI e reduzem o pico de clustering)
-
-**Resultado ensemble:** ACF(|OFI|, lag=1) = 0.441 (100% pass rate) ✅
+Média −0,348 com desvio entre seeds de 1,493: o desvio é 4× a média. Com 50k ticks a skewness é
+determinada por um punhado de eventos de cauda, então o estimador não tem resolução nessa amostra.
+O sinal está na direção certa (negativo) mas não é distinguível de zero. Isso é limite de amostra,
+não defeito da ecologia; rodadas mais longas são o caminho, não recalibrar agentes.
 
 ---
 
-## Fluxo de Dados da Análise
+## Teste de emergência: innovations gaussianas
 
-```text
-sim_headless (50k ticks)
-        │
-        ▼
-BinaryLogWriter → logs/run.bin (29 MB aprox.)
-        │
-        ▼
-BinaryLogReader::next()
-        │
-        ├── MarketSnapshotRecord
-        │       └── mid_price, spread, ofi, regime
-        │
-        └── TradeRecord (contagem)
+A pergunta é se os fatos são produzidos pelo mercado ou herdados da distribuição de entrada.
+`--gaussian` troca as innovations Student-t(ν=3,5) do fundamental por normais e mantém tudo o mais
+igual, inclusive as seeds.
 
-log_returns(mid_prices)
-        │  log(P_t / P_{t-1}) para P > 0
-        ▼
-vector<double> rets  (n ≈ 49999)
-        │
-        ├── kurtosis_excess(rets)          → Fato 1
-        ├── AcfComputer::compute(rets)[1]  → Fato 2
-        ├── AcfComputer::compute_abs(rets) → Fatos 3, 4
-        ├── skewness(rets)                 → Fato 5
-        ├── HillEstimator::estimate_abs    → Fato 6
-        ├── CoV(spreads > 0)              → Fato 7
-        └── AcfComputer::compute(ofi)[1]  → Fato 8
-```
+| # | Fato | Student-t | Gaussiano |
+|---|---|---|---|
+| 1 | Caudas gordas (curtose) | 81,12 (10/10) | 85,22 (10/10) |
+| 3 | Clustering de vol | 0,084 (10/10) | 0,083 (10/10) |
+| 4 | Memória longa | 0,055 (10/10) | 0,057 (10/10) |
+| 6 | Hill α | 4,59 (10/10) | 4,57 (10/10) |
+| — | corr(rV, r_mid) h=100 | 0,859 | 0,862 |
+| — | Total | 6,6/8 (82,5%) | 6,6/8 (82,5%) |
+
+As caudas sobrevivem intactas. Isso é a evidência de que a curtose de 81 é gerada pela
+microestrutura — fatiamento de ordens, cascatas de stop e retirada de liquidez do maker — e não
+copiada da cauda do input.
 
 ---
 
-## Harness de Calibração: sim_calibrate
-
-`sim_calibrate` roda N seeds em paralelo (logger silencioso) e agrega média±std de cada fato:
+## Como investigar uma regressão
 
 ```bash
-# 10 seeds × 50k ticks — resultado canônico da Etapa 8
-./build/sim_calibrate --seeds 10 --duration 50000
+# 1. O ensemble é a unidade de medida, nunca uma seed
+./build/sim_calibrate --seeds 10 --duration 50000 --outdir /tmp/cal/
 
-# Saída exemplo:
-# | # | Test                              | Mean      | Pass% |
-# | 1 | Fat tails (kurtosis)              |   65.7209 | 100.0%|
-# | 2 | Return ACF ≈ 0 (lag 1)          |    0.0580 | 100.0%|
-# | 3 | Vol clustering (ACF|r| lag=2)     |    0.0973 |  80.0%|
-# | 4 | Long memory of vol (mean ACF|r|)  |    0.0716 |  90.0%|
-# | 5 | Gain-loss asymmetry (skew < 0)    |    0.2218 |  30.0%|
-# | 6 | Hill tail index α ∈ [1.8, 6.0] |    4.0162 |  90.0%|
-# | 7 | Spread variation (CoV > 0.08)     |    0.7692 | 100.0%|
-# | 8 | OFI clustering (ACF|OFI| lag=1)   |    0.4412 | 100.0%|
-# LB Q=1570, Hill α=4.016, Vol-vol corr=0.131
-# Overall: 86.2% (6.9/8.0 avg)
+# 2. Ecologia primeiro: algum tipo parado no limite?  A tabela por tipo do
+#    sim_headless mostra Σ|posição| e % de ticks no limite.
+./build/sim_headless --seed 42 --duration 50000 --output /tmp/A.bin
+
+# 3. Price discovery antes de fatos: se corr(h=100) caiu, nenhum número da
+#    tabela de fatos significa coisa alguma.
+
+# 4. Determinismo (dois hashes iguais):
+./build/sim_headless --seed 42 --duration 50000 --output /tmp/B.bin
+shasum -a 256 /tmp/A.bin /tmp/B.bin
 ```
 
-Qualquer alteração nos parâmetros críticos (ver `CLAUDE.md`) deve ser re-validada com este harness antes de merge.
+Se um fato mudou depois de uma alteração em agente, o suspeito é o **stream de RNG**, não a
+economia: um sorteio feito sob condição de estado (posição, inventário) faz o stream depender do
+estado e desloca toda a trajetória. Sortear sempre, decidir depois.
 
 ---
 
-## Diagnóstico: Como investigar falha no ACF
-
-Se `|ACF(r,lag=1)| > 0.10`, seguir este protocolo de isolamento:
-
-```bash
-# 1. Zerar todos os agentes em Config.h (count=0 para todos)
-# 2. Rebuild e rodar
-cmake --build build --target sim_headless
-./build/sim_headless --seed 42 --duration 50000 --output /tmp/zero.bin
-
-# 3. Exportar CSV e verificar trajetória de preços
-./build/analysis_csv_export /tmp/zero.bin /tmp/csv_zero/
-python3 -c "
-import math
-prices = [int(l.split(',')[1]) for l in open('/tmp/csv_zero/snapshots.csv') if not l.startswith('tick')]
-for t in [0,10000,20000,30000,40000,49999]:
-    print(f't={t}: price={prices[t]} (${prices[t]*0.01:.2f})')
-"
-```
-
-Se o preço deriva para zero: o problema é o drift cumulativo do fundamental. Verificar:
-- `RegimeSwitchingProcess.h`: `mu_low`, `mu_high` estão com drift compensatório?
-- `E[Δlog_s/tick] ≈ 0`?
-
-Se o preço permanece estável mas ACF > 0 com zero agentes: problema no cálculo de ACF ou na discretização do preço.
-
----
-
-## Referências
+## Referências de código
 
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `src/analysis/Report.{h,cpp}` | Implementação dos 8 fatos, leitura do log binário |
-| `src/analysis/AcfComputer.{h,cpp}` | Estimador biased ACF, ACF de valor absoluto |
-| `src/analysis/HillEstimator.{h,cpp}` | Estimador Hill do índice de cauda de Pareto |
-| `src/analysis/FlashCrashDetector.{h,cpp}` | Detecção de flash crashes (informativo) |
-| `src/economics/RegimeSwitchingProcess.h` | Config dos regimes com drift compensatório |
-| `src/tools/sim_headless.cpp` | CLI que executa sim + análise inline |
+| `src/analysis/Report.{h,cpp}` | Os 8 fatos, price discovery, leitura do log v3 |
+| `src/analysis/AcfComputer.{h,cpp}` | ACF (estimador biased) e ACF de valores absolutos |
+| `src/analysis/HillEstimator.{h,cpp}` | Índice de cauda multi-k |
+| `src/tools/sim_calibrate.cpp` | Harness de ensemble, `--gaussian`, `--save` |
+| `src/tools/sim_headless.cpp` | Uma rodada, tabela por tipo de agente, relatório inline |
+| `src/marketdata/MarketDataPublisher.cpp` | Mid carry-forward sem âncora no fundamental |
