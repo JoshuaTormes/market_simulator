@@ -55,3 +55,4 @@ add_sim_test(test_sim_loop_smoke         integration/test_sim_loop_smoke.cpp)
 # Phase 8
 add_sim_test(test_binary_log_roundtrip   unit/test_binary_log_roundtrip.cpp)
 add_sim_test(test_replay_determinism     integration/test_replay_determinism.cpp)
+add_sim_test(test_price_discovery        integration/test_price_discovery.cpp)

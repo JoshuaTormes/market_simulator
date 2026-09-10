@@ -1,15 +1,31 @@
 #pragma once
 // Informed trader with linear price impact: Kyle (1985).
+//
+// The trader sees the latent fundamental through multiplicative noise,
+// S = V·exp(ε), and trades the *gap* between that private value and the
+// quoted mid.  Two properties make it a price-discovery mechanism rather than
+// a one-way accumulator:
+//
+//   * it only crosses the spread when the gap is wider than the cost of
+//     crossing it, so the mid is pushed toward V and then left alone;
+//   * once the gap fits inside the spread the position is unwound, which
+//     releases the inventory the earlier trades built up.
+//
+// The previous version compared V to the mid with an additive noise measured
+// in ticks (0.005 of a tick — effectively no noise), ignored the spread, and
+// never unwound, so both informed traders sat pinned at their position limit
+// for 94% of the run and stopped trading altogether.
 #include "AgentBase.h"
 
 class InformedTraderKyle : public AgentBase {
 public:
     struct Params {
-        double lambda_inv     = 0.5;    // inverse of Kyle's λ: order size per unit of signal
-        double signal_noise   = 0.005;  // N(0,σ) noise added to perceived fundamental
-        double min_signal     = 2.0;    // minimum |signal| in ticks to act (avoids noise trading)
-        Qty    max_order_size = 50;
-        double pareto_alpha   = 1.5;    // Pareto tail exponent for order sizing (0 = Kyle only)
+        double signal_noise_log = 5e-4; // sigma of the log-noise on the observed V
+        double lambda_inv       = 0.5;  // lots per tick of gap (inverse Kyle lambda)
+        double margin_ticks     = 1.0;  // gap must beat half-spread by this much
+        Qty    max_order_size   = 200;  // cap per aggressive order
+        Qty    unwind_qty       = 50;   // lots returned per tick when the gap is closed
+        double pareto_alpha     = 1.5;  // heavy-tailed size multiplier (0 = pure Kyle)
     };
 
     InformedTraderKyle(AgentId id, const std::string& ticker,
@@ -21,5 +37,5 @@ public:
 
 private:
     Params p_;
-    std::normal_distribution<double> noise_;
+    std::normal_distribution<double> log_noise_;
 };

@@ -66,17 +66,26 @@ std::vector<std::unique_ptr<IAgent>> AgentFactory::create_all() {
             p));
     }
 
-    // Informed traders — Pareto-multiplied Kyle sizes for heavy-tailed informed trades
+    // Informed traders — trade the gap between a noisy private value and the
+    // quoted mid, and unwind once the gap fits inside the spread.
     for (int i = 0; i < cfg_.informed_traders.count; ++i) {
         InformedTraderKyle::Params p;
-        p.lambda_inv      = cfg_.informed_traders.lambda_inv;
-        p.pareto_alpha    = cfg_.informed_traders.pareto_alpha;
-        p.max_order_size  = static_cast<Qty>(cfg_.informed_traders.max_order_size);
+        p.signal_noise_log = cfg_.informed_traders.signal_noise_log;
+        p.lambda_inv       = cfg_.informed_traders.lambda_inv;
+        p.margin_ticks     = cfg_.informed_traders.margin_ticks;
+        p.max_order_size   = static_cast<Qty>(cfg_.informed_traders.max_order_size);
+        p.unwind_qty       = static_cast<Qty>(cfg_.informed_traders.unwind_qty);
+        p.pareto_alpha     = cfg_.informed_traders.pareto_alpha;
+
+        RiskLimits rl;
+        rl.max_position = static_cast<Qty>(cfg_.informed_traders.max_position);
+
         InformationProfile ip;
         ip.sees_fundamental = true;
+
         agents.emplace_back(std::make_unique<InformedTraderKyle>(
             alloc_id(), ticker_, rng_.for_consumer("IT_" + std::to_string(i)),
-            p, RiskLimits{}, LatencyProfile{}, ip));
+            p, rl, LatencyProfile{}, ip));
     }
 
     // Momentum traders

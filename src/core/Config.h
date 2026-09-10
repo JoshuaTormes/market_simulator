@@ -47,7 +47,7 @@ struct MarketMakerParams {
     double adverse_sel_ticks_per_lot = 0.01;
     double q_soft                = 300.0;   // position where the growing side stops quoting
     // Belief dynamics.
-    double lambda_kyle  = 0.015;
+    double lambda_kyle  = 0.06;
     double belief_decay = 0.02;
 };
 
@@ -59,11 +59,14 @@ struct NoiseTraderParams {
 };
 
 struct InformedTraderParams {
-    int count = 2;
-    double lambda_inv                 = 0.5;
-    double pareto_alpha               = 1.5;  // Pareto tail exponent for order sizing
-    int    max_order_size             = 100;  // raised from 50 to allow crash differentiation
-    ParamRange<double> signal_lag_range = {0, 3};
+    int    count             = 3;
+    double signal_noise_log  = 5e-4;  // multiplicative error on the observed fundamental
+    double lambda_inv        = 0.5;   // lots per tick of pricing gap
+    double margin_ticks      = 1.0;   // gap must beat half-spread by this much
+    int    max_order_size    = 200;
+    int    unwind_qty        = 50;    // lots returned per tick once the gap is closed
+    int    max_position      = 2000;
+    double pareto_alpha      = 1.5;   // Pareto tail exponent for order sizing
 };
 
 struct MomentumParams {
