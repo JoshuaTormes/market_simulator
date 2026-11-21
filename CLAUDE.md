@@ -47,7 +47,8 @@ vivem em `src/core/Config.h`.
 
 `feature/validacao-honesta` — execução do plano em
 [specs/plans/2026-11-18_correcao-circularidade-validacao/](./specs/plans/2026-11-18_correcao-circularidade-validacao/plano.md).
-Etapas 0–13 e a Verificação Final concluídas (VAL × 250 pregões em `resultados/final_val250`); nada commitado.
+Etapas 0–13 e a Verificação Final concluídas (VAL × 250 pregões em `resultados/final_val250`). Commits `4360504` (plano) e `99c4feb`
+(reconciliação de momentum e mean-reverter); `specs/` fica fora do git.
 
 **Protocolo.** As métricas são separadas em CAL (podem orientar ajuste), VAL (hold-out: julgam uma
 mudança já escolhida e **nunca** orientam ajuste) e diag (`src/analysis/Protocol.h`). CAL = seeds
