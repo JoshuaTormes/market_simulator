@@ -23,6 +23,5 @@ public:
 private:
     Params p_;
     RollingWindow<double> win_;
-    int  position_ = 0;  // +1 long, -1 short, 0 flat
     int  ticks_    = 0;
 };

@@ -27,17 +27,24 @@ std::vector<Action> MeanReverterOU::on_market_data(const AgentSnapshot& snap) {
     double z = (mid - mu) / sig;
     std::vector<Action> actions;
 
-    if (position_ == 0) {
-        if (z < -p_.entry_z)
-            actions.push_back(submit(Side::Buy,  OrderType::Market, 0, p_.qty)), position_ =  1;
-        else if (z > p_.entry_z)
-            actions.push_back(submit(Side::Sell, OrderType::Market, 0, p_.qty)), position_ = -1;
-    } else if (position_ > 0 && z > -p_.exit_z) {
-        actions.push_back(submit(Side::Sell, OrderType::Market, 0, p_.qty));
-        position_ = 0;
-    } else if (position_ < 0 && z < p_.exit_z) {
-        actions.push_back(submit(Side::Buy,  OrderType::Market, 0, p_.qty));
-        position_ = 0;
+    // Target position and current side both from the ledger, not a flag: see
+    // MomentumTrader — an order lost to an empty book side must not become
+    // permanent inventory, and a lost exit is retried on the next tick.
+    const auto to_target = [&](int sign) {
+        const double gap = sign * static_cast<double>(p_.qty) - snap.own_inventory;
+        const Qty    q   = static_cast<Qty>(std::llround(std::abs(gap)));
+        if (q > 0) actions.push_back(submit(gap > 0.0 ? Side::Buy : Side::Sell,
+                                            OrderType::Market, 0, q));
+    };
+    const int position = snap.own_inventory > 0.0 ? 1 : (snap.own_inventory < 0.0 ? -1 : 0);
+
+    if (position == 0) {
+        if (z < -p_.entry_z)      to_target(+1);
+        else if (z > p_.entry_z)  to_target(-1);
+    } else if (position > 0 && z > -p_.exit_z) {
+        to_target(0);
+    } else if (position < 0 && z < p_.exit_z) {
+        to_target(0);
     }
 
     return actions;
