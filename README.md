@@ -1,104 +1,105 @@
-# Simulador de Microestrutura de Mercado
+# Market Microstructure Simulator
 
-Este é um simulador de mercado de ações escrito em C++17. Ele reproduz um pregão segundo a segundo,
-com um livro de ofertas real e 71 agentes que seguem estratégias diferentes.
+A stock market simulator written in C++17. It replays a trading session second by second, with a
+real limit order book and 71 agents running different strategies.
 
-O ponto central: **ninguém escreve o preço.** A empresa tem um valor "verdadeiro" que muda com o
-tempo e com as notícias, mas esse valor fica escondido. O preço negociado nasce só do encontro
-entre ordens de compra e de venda, e o que se mede é se o mercado consegue descobrir o valor
-verdadeiro sozinho.
+The core idea: **nobody writes the price.** The company has a "true" value that changes over time
+and with news, but that value stays hidden. The traded price comes only from buy and sell orders
+meeting in the book, and what gets measured is whether the market discovers the true value on its
+own.
 
-## Como funciona
+## How it works
 
-Cada **tick** é 1 segundo de negociação. Um pregão tem 23.400 ticks (6,5 h), e um ano tem 252
-pregões. A cada tick, na mesma ordem fixa:
+Each **tick** is 1 second of trading. A session has 23,400 ticks (6.5 h), and a year has 252
+sessions. Every tick runs the same fixed sequence:
 
-1. **O valor fundamental anda.** O valor verdadeiro da empresa (`V`) muda um pouco. Ele alterna
-   entre fases calmas (que duram horas) e fases de volatilidade alta (que duram minutos).
-2. **Às vezes sai uma notícia.** Uma manchete muda `V` de uma vez, para cima ou para baixo.
-3. **Os agentes decidem.** Cada agente olha o mercado do segundo anterior e envia ordens. A ordem
-   em que eles agem é sorteada a cada tick, para ninguém ter vantagem fixa de chegar primeiro.
-4. **O controle de risco filtra.** Ordens que estouram o limite de posição de um agente são barradas.
-5. **O livro de ofertas casa as ordens.** Vale a prioridade de preço e depois a de tempo. Cada
-   negócio fechado atualiza a posição e o lucro dos dois lados.
-6. **O mercado é publicado.** Melhor compra, melhor venda, profundidade e último preço ficam
-   visíveis para o próximo tick.
+1. **The fundamental value moves.** The company's true value (`V`) changes a little. It switches
+   between calm phases (lasting hours) and high-volatility phases (lasting minutes).
+2. **Sometimes a news item arrives.** A headline moves `V` at once, up or down.
+3. **The agents decide.** Each agent looks at the market as of the previous second and sends
+   orders. The order in which they act is reshuffled every tick, so nobody gets a fixed
+   first-arrival advantage.
+4. **The risk gate filters.** Orders that would break an agent's position limit are blocked.
+5. **The order book matches.** Price priority first, then time priority. Each fill updates the
+   position and P&L of both sides.
+6. **The market is published.** Best bid, best ask, depth and last price become visible for the
+   next tick.
 
-O resultado é um mercado vivo: o preço oscila, o spread abre em momentos de estresse, notícias
-geram saltos e cascatas de stop podem derrubar o preço por alguns minutos.
+The result is a live market: the price fluctuates, news causes jumps, and stop cascades can knock
+the price down for a few minutes.
 
-## Os agentes
+## The agents
 
-| Agente | Quantos | O que faz | Vê o valor verdadeiro? |
+| Agent | Count | What it does | Sees the true value? |
 |---|---|---|---|
-| **Market maker** | 3 | Cota compra e venda o tempo todo e ganha a diferença (o spread). Não sabe o valor verdadeiro: deduz pelo fluxo de ordens (muita compra → sobe a cotação) e pelas notícias públicas | Não |
-| **Informado** | 2 | Sabe o valor verdadeiro (com um pouco de ruído). Quando o preço está longe dele, monta uma posição e, ao negociar, empurra o preço de volta | Sim |
-| **Noise trader** | 25 | Compra e vende sem informação, como o investidor de varejo. Gera boa parte do volume e é quem paga a conta dos outros | Não |
-| **Institucional** | 2 | Um fundo que precisa executar ordens grandes. Fatia cada ordem em pedaços menores ao longo do tempo para não mover demais o preço | Não |
-| **Momentum** | 3 | Segue tendência de curto prazo (cruzamento de médias móveis de segundos), com stop pela volatilidade recente | Não |
-| **Mean-reverter** | 2 | Aposta que o preço volta à média quando se afasta muito | Não |
-| **Reator de notícia** | 8 | Reage às manchetes e segura a posição por 5 minutos a 1 hora | Não |
-| **Stop-loss** | 6 | Monta uma posição e zera tudo quando a perda passa de 1,5–4%; depois de um tempo monta outra. 70% das posições são compradas, então uma queda dispara mais stops que uma alta, e os stops em sequência geram cascatas de queda | Não |
-| **Ordem limitada** | 20 | Deixa ordens paradas no livro perto do preço, sem nunca cruzar. Mistura visão do valor (com erro), tendência e ruído | Sim, com erro |
+| **Market maker** | 3 | Quotes both sides all the time and earns the spread. Does not know the true value: infers it from order flow (heavy buying → raise the quote) and from public news | No |
+| **Informed trader** | 2 | Knows the true value (with some noise). When the price is far from it, builds a position, and its trading pushes the price back | Yes |
+| **Noise trader** | 25 | Buys and sells without information, like a retail investor. Generates much of the volume and ends up paying everyone else | No |
+| **Institutional** | 2 | A fund that has to execute large orders. Slices each order into smaller pieces over time so as not to move the price too much | No |
+| **Momentum** | 3 | Follows short-term trends (moving-average crossover over seconds), with a stop based on recent volatility | No |
+| **Mean reverter** | 2 | Bets that the price returns to its average after straying too far | No |
+| **News reactor** | 8 | Reacts to headlines and holds the position for 5 minutes to 1 hour | No |
+| **Stop-loss** | 6 | Opens a position and closes it entirely when the loss exceeds 1.5–4%; after a while it opens another. 70% of positions are long, so a drop triggers more stops than a rise, and stops in a row produce downward cascades | No |
+| **Limit order trader** | 20 | Leaves resting orders in the book near the price and never crosses. Blends a view of the value (with error), trend and noise | Yes, with error |
 
-A chegada de ordens de noise traders, institucionais e ordens limitadas segue a forma de **U** dos
-mercados reais: é maior na abertura e no fechamento e menor no meio do dia. Essa forma é um dado
-de entrada do modelo, não um resultado.
+Order arrival for noise traders, institutionals and limit order traders follows the **U shape**
+of real markets: higher at the open and close, lower mid-day. That shape is a model input, not a
+result.
 
-## Quem ganha e quem perde
+## Who wins and who loses
 
-O dinheiro do simulador é fechado: o que um agente ganha, outro perde, e a soma dá **zero exato**.
-Números médios de 20 simulações independentes de 250 pregões (um ano de mercado cada), em milhares
-de dólares:
+Money in the simulator is closed: whatever one agent gains, another loses, and the total is
+**exactly zero**. Averages over 20 independent runs of 250 sessions (one market year each), in
+thousands of US dollars:
 
-| Agente | Lucro total | Por agente | Seeds com lucro | Por quê |
+| Agent | Total P&L | Per agent | Runs in profit | Why |
 |---|---|---|---|---|
-| **Informados** | **+1.383** | +692 | 20 de 20 | Sabem o valor verdadeiro e ganham de quem não sabe |
-| **Market makers** | **+521** | +174 | 19 de 20 | Ganham o spread, mesmo perdendo às vezes para o informado |
-| **Ordem limitada** | **+301** | +15 | 20 de 20 | Ganham o spread como pequenos market makers |
-| Mean-reverter | +19 | +9 | 17 de 20 | Lucro pequeno |
-| Stop-loss | −0,6 | −0,1 | 9 de 20 | Empata: negocia pouco |
-| Reatores de notícia | −66 | −8 | 0 de 20 | O market maker já ajustou o preço antes de eles reagirem |
-| Institucional | −250 | −125 | 0 de 20 | Paga pelo impacto de executar ordens grandes |
-| Momentum | −386 | −129 | 0 de 20 | Entra atrasado na tendência e paga o spread toda vez que vira a posição |
-| **Noise traders** | **−1.520** | −61 | 0 de 20 | Negociam sem informação: pagam o spread e perdem para o informado |
+| **Informed traders** | **+1,383** | +692 | 20 of 20 | They know the true value and win against those who don't |
+| **Market makers** | **+521** | +174 | 19 of 20 | They earn the spread, even though they sometimes lose to the informed |
+| **Limit order traders** | **+301** | +15 | 20 of 20 | They earn the spread as small market makers |
+| Mean reverters | +19 | +9 | 17 of 20 | Small profit |
+| Stop-loss | −0.6 | −0.1 | 9 of 20 | Break even: they trade little |
+| News reactors | −66 | −8 | 0 of 20 | The market maker has already repriced before they react |
+| Institutional | −250 | −125 | 0 of 20 | They pay the impact of executing large orders |
+| Momentum | −386 | −129 | 0 of 20 | They enter trends late and pay the spread every time they flip |
+| **Noise traders** | **−1,520** | −61 | 0 of 20 | They trade without information: they pay the spread and lose to the informed |
 
-É o que a teoria de microestrutura prevê (Kyle 1985; Glosten-Milgrom 1985). Ganha quem tem
-informação ou fornece liquidez. Paga quem negocia sem informação ou precisa executar com pressa.
+This is what microstructure theory predicts (Kyle 1985; Glosten-Milgrom 1985). Those who have
+information or provide liquidity win. Those who trade without information or need to execute in a
+hurry pay.
 
-## O que o simulador reproduz e o que não
+## What the simulator reproduces and what it doesn't
 
-Ele é comparado com os "fatos estilizados", padrões estatísticos que aparecem em praticamente
-todo mercado real. Calibração e validação usam simulações diferentes, para que o ajuste não seja
-avaliado com os mesmos dados que o orientaram.
+It is checked against the "stylized facts", statistical patterns found in nearly every real
+market. Calibration and validation use different runs, so a tuning choice is never judged on the
+same data that guided it.
 
-**Reproduz:**
-- caudas gordas: movimentos extremos são bem mais frequentes do que numa curva normal;
-- retornos mais longos ficam mais próximos da curva normal, como no mercado real;
-- volatilidade em grupos a 1 minuto (períodos agitados seguidos de agitados);
-- volume e volatilidade andando juntos;
-- spread de ~2,7 bp, que varia ao longo do pregão;
-- negócios do mesmo lado em sequência no curto prazo (uma ordem grande fatiada vira várias compras
-  seguidas);
-- preço colado no valor verdadeiro (desvio típico de 0,3%), e um ano inteiro de pregões sem nenhuma
-  simulação quebrar.
+**Reproduces:**
+- fat tails: extreme moves are far more frequent than under a normal curve;
+- longer-horizon returns get closer to a normal curve, as in real markets;
+- volatility clustering at 1 minute (turbulent periods followed by turbulent periods);
+- volume and volatility moving together;
+- a spread of ~2.7 bp that varies over the session;
+- short-run runs of same-side trades (a sliced large order becomes several buys in a row);
+- a price that stays close to the true value (typical deviation 0.3%), and a full year of sessions
+  without any run breaking down.
 
-**Ainda não reproduz (medido e documentado):**
-- o retorno de 1 minuto reverte um pouco; no mercado real ele é quase imprevisível;
-- a volatilidade não tem a memória longa observada na prática;
-- falta o efeito alavancagem (no mercado real, quedas aumentam a volatilidade);
-- a sequência de negócios do mesmo lado some rápido demais (no real ela dura muito mais);
-- não se confirma que quedas fortes sejam mais comuns que altas fortes, como no real (o teste sai
-  inconclusivo);
-- o preço demora alguns minutos para alcançar o valor verdadeiro (meia-vida de ~4,5 min);
-- acontecem cerca de 0,3 flash crash por pregão, mais do que o normal.
+**Does not reproduce yet (measured and documented):**
+- the 1-minute return reverts slightly; in real markets it is nearly unpredictable;
+- volatility lacks the long memory seen in practice;
+- the leverage effect is missing (in real markets, drops raise volatility);
+- runs of same-side trades fade too fast (in real markets they last much longer);
+- it does not confirm that sharp drops are more common than sharp rises, as in real markets (the
+  test is inconclusive);
+- the price takes a few minutes to catch up with the true value (half-life ~4.5 min);
+- there are about 0.3 flash crashes per session, more than normal.
 
-Em números: passam cerca de 5 dos 10 fatos da bateria principal. Os detalhes estão em
-[docs/STYLIZED_FACTS_VALIDATION.md](docs/STYLIZED_FACTS_VALIDATION.md).
+In numbers: about 5 of the 10 facts in the main battery pass. Details are in
+[docs/STYLIZED_FACTS_VALIDATION.md](docs/STYLIZED_FACTS_VALIDATION.md) (in Portuguese).
 
-## Como compilar e rodar
+## Build and run
 
-Linha de comando (simulação, calibração e testes):
+Command line (simulation, calibration and tests):
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSIM_BUILD_UI=OFF
@@ -106,7 +107,7 @@ cmake --build build -j8
 ctest --test-dir build
 ```
 
-Janela gráfica (precisa de `brew install sfml@2`; no macOS compile com o clang da Apple):
+Graphical window (needs `brew install sfml@2`; on macOS build with Apple clang):
 
 ```bash
 cmake -S . -B build_ui -DCMAKE_BUILD_TYPE=Release \
@@ -115,26 +116,26 @@ cmake --build build_ui -j8 --target simulador
 ./build_ui/simulador
 ```
 
-Exemplos:
+Examples:
 
 ```bash
-# Uma simulação de 5 pregões, com relatório no final
+# One 5-session run, with a report at the end
 ./build/sim_headless --seed 42 --days 5 --output logs/run.bin
 
-# Exporta o log para CSV
+# Export the log to CSV
 ./build/analysis_csv_export logs/run.bin out/
 
-# 10 simulações de 60 pregões em paralelo, com estatística entre elas
+# 10 runs of 60 sessions in parallel, with statistics across them
 ./build/sim_calibrate --seed-set cal --days 60 --jobs 8 --outdir /tmp/cal
 ```
 
-A mesma seed sempre produz exatamente o mesmo resultado, num mesmo compilador. Os números deste
-README vêm do build com g++ (GCC 14); o clang dá outra trajetória para a mesma seed.
+The same seed always produces exactly the same result with the same compiler. The numbers in this
+README come from the g++ build (GCC 14); clang gives a different path for the same seed.
 
-## Documentação técnica
+## Technical documentation (in Portuguese)
 
-- [docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md): camadas do código, ordem do tick,
-  detalhes de cada agente, processo fundamental, formato do log e como adicionar um agente novo.
-- [docs/STYLIZED_FACTS_VALIDATION.md](docs/STYLIZED_FACTS_VALIDATION.md): o protocolo de
-  calibração e validação, cada fato estilizado, os resultados e as falhas medidas.
-- Os parâmetros do modelo ficam em `src/core/Config.h`.
+- [docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md): code layers, tick order, details of
+  each agent, the fundamental process, the log format and how to add a new agent.
+- [docs/STYLIZED_FACTS_VALIDATION.md](docs/STYLIZED_FACTS_VALIDATION.md): the calibration and
+  validation protocol, each stylized fact, the results and the measured failures.
+- Model parameters live in `src/core/Config.h`.
