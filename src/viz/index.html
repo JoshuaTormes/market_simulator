@@ -14,7 +14,7 @@ body { background:#111; color:white; font-family: monospace; margin:0; padding:0
 </head>
 <body>
 
-<div id="status">Desconectado. Tentando conectar...</div>
+<!-- <div id="status">Desconectado. Tentando conectar...</div> -->
 <div id="charts">
     <div id="chart"></div>
     <div id="pnlChart"></div>
@@ -80,15 +80,15 @@ function renderPnL() {
 }
 
 function connectWebSocket(){
-    statusElement.textContent = `Tentando conectar em ws://localhost:8765...`;
-    statusElement.style.color='orange';
+    // statusElement.textContent = `Tentando conectar em ws://localhost:8765...`;
+    // statusElement.style.color='orange';
 
     socket = new WebSocket("ws://localhost:8765");
 
     socket.onopen = ()=>{
         console.log("WebSocket conectado.");
-        statusElement.textContent = "Conectado e recebendo dados.";
-        statusElement.style.color='lightgreen';
+        // statusElement.textContent = "Conectado e recebendo dados.";
+        // statusElement.style.color='lightgreen';
         reconnectInterval = 500;
     };
 

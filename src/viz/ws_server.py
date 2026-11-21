@@ -5,8 +5,8 @@ import pandas as pd
 import os
 
 conexoes = set()
-CANDLES_FILE = "candles.csv"
-PNL_FILE = "agents_pnl.csv"  # CSV gerado pelo Engine
+CANDLES_FILE = "../build/candles.csv"
+PNL_FILE = "../build/agents_pnl.csv" 
 last_candle_sent = 0
 last_pnl_sent = 0
 current_candle_size = 0
