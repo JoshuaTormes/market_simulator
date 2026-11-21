@@ -49,7 +49,7 @@ vivem em `src/core/Config.h`.
 
 ## Branch Atual
 
-`feature/validacao-honesta` — execução do plano em
+`main`, que recebeu `feature/validacao-honesta` pelos PRs #1 e #2. Último plano executado:
 [specs/plans/2026-11-18_correcao-circularidade-validacao/](./specs/plans/2026-11-18_correcao-circularidade-validacao/plano.md).
 Etapas 0–13 e a Verificação Final concluídas (VAL × 250 pregões em `resultados/final_val250`). Commits `4360504` (plano) e `99c4feb`
 (reconciliação de momentum e mean-reverter); `specs/` fica fora do git.
