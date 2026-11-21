@@ -11,6 +11,8 @@
 // 10. snapshot_buffer.commit(new snapshot)
 // 11. logger entry
 #include "SimulationLoop.h"
+#include "agents/MetaorderEvent.h"
+#include "persistence/ILogSink.h"
 #include <thread>
 #include <chrono>
 #include <variant>
@@ -67,6 +69,15 @@ void SimulationLoop::run(SnapshotBuffer& snap_buf) {
     logger_.log_info(current_tick_, "SimulationLoop finished");
 }
 
+void SimulationLoop::wire_log_bus() {
+    if (log_bus_wired_ || !event_bus_ || !log_writer_) return;
+    ILogSink* w = log_writer_;
+    event_bus_->subscribe<MetaorderEvent>([w](const MetaorderEvent& m) {
+        w->write_metaorder(m);
+    });
+    log_bus_wired_ = true;
+}
+
 void SimulationLoop::flush_pending_news() {
     if (!event_bus_) return;
     std::lock_guard<std::mutex> lk(pending_news_mu_);
@@ -103,8 +114,10 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
     // A public announcement is information about the asset, so it moves the
     // fundamental itself.  Applied here, after step(), so the shock lands on
     // the same tick the agents learn about it.
-    for (const auto& nev : news_events)
+    for (const auto& nev : news_events) {
         fundamental_.apply_shock(nev.impact_log_return);
+        news_cum_log_ += nev.impact_log_return;
+    }
 
     // Log news events.
     if (log_writer_) {
@@ -145,6 +158,7 @@ void SimulationLoop::tick_once(Tick now, SnapshotBuffer& snap_buf) {
     MarketSnapshot snap = publisher_.publish(now);
     snap.regime            = fundamental_.current_regime_hint();
     snap.fundamental_value = fundamental_ticks;
+    snap.news_cum_log      = news_cum_log_;
 
     // Detect and log regime changes before updating prev_snap_.
     if (log_writer_ && now > 0 && snap.regime != prev_snap_.regime)

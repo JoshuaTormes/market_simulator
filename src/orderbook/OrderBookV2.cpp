@@ -48,8 +48,8 @@ Trade OrderBookV2::fill_pair(
     t.taker_side  = taker.side;
     t.tick        = now;
     t.seq_no      = seq;
-    t.fee_taker   = fee_model_.taker_fee(exec_qty);
-    t.fee_maker   = -fee_model_.maker_rebate(exec_qty); // negative = rebate credit
+    t.fee_taker   = fee_model_.taker_fee(exec_qty, exec_price);
+    t.fee_maker   = -fee_model_.maker_rebate(exec_qty, exec_price); // negative = rebate credit
 
     if (taker.side == Side::Buy) {
         t.maker_id    = maker.id;
@@ -147,8 +147,8 @@ std::vector<Trade> OrderBookV2::match(Tick now) {
         tr.qty         = exec_qty;
         tr.tick        = now;
         tr.seq_no      = next_trade_seq_++;
-        tr.fee_taker   = fee_model_.taker_fee(exec_qty);
-        tr.fee_maker   = -fee_model_.maker_rebate(exec_qty);
+        tr.fee_taker   = fee_model_.taker_fee(exec_qty, exec_price);
+        tr.fee_maker   = -fee_model_.maker_rebate(exec_qty, exec_price);
         if (bid_is_maker) {
             tr.maker_id    = bid_node.id;    tr.maker_agent = bid_node.agent_id;
             tr.taker_id    = ask_node.id;    tr.taker_agent = ask_node.agent_id;
@@ -233,8 +233,8 @@ std::vector<Trade> OrderBookV2::execute_aggressive(Order order, Tick now) {
                 tr.taker_agent = order.agent_id;
                 tr.tick        = now;
                 tr.seq_no      = next_trade_seq_++;
-                tr.fee_taker   = fee_model_.taker_fee(exec_qty);
-                tr.fee_maker   = -fee_model_.maker_rebate(exec_qty);
+                tr.fee_taker   = fee_model_.taker_fee(exec_qty, exec_price);
+                tr.fee_maker   = -fee_model_.maker_rebate(exec_qty, exec_price);
 
                 maker.qty_remaining -= exec_qty;
                 remaining           -= exec_qty;
@@ -372,6 +372,18 @@ Price OrderBookV2::best_bid() const {
 
 Price OrderBookV2::best_ask() const {
     return asks_.empty() ? 0 : asks_.begin()->first;
+}
+
+std::pair<Qty, Qty> OrderBookV2::top_qty_where(
+        const std::function<bool(AgentId)>& owned) const {
+    Qty b = 0, a = 0;
+    if (!bids_.empty())
+        for (const auto& node : bids_.begin()->second)
+            if (owned(node.agent_id)) b += node.qty_remaining;
+    if (!asks_.empty())
+        for (const auto& node : asks_.begin()->second)
+            if (owned(node.agent_id)) a += node.qty_remaining;
+    return {b, a};
 }
 
 std::vector<DepthLevel> OrderBookV2::top_bids(int n) const {

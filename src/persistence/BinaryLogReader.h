@@ -19,7 +19,8 @@ using LogRecord = std::variant<
     MarketSnapshotRecord,
     NewsEventRecord,
     RegimeChangeRecord,
-    LedgerEventRecord
+    LedgerEventRecord,
+    MetaorderRecord
 >;
 
 class BinaryLogReader {

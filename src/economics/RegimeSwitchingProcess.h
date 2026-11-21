@@ -1,5 +1,5 @@
 #pragma once
-// Hamilton (1989) Regime-Switching: Markov chain between {low_vol, high_vol, crash}.
+// Hamilton (1989) Regime-Switching: Markov chain between {quiet, elevated, high_vol}.
 // In each regime, the process follows GBM with regime-specific (μ, σ).
 // Transition matrix P[from][to] is row-stochastic (rows sum to 1).
 // Reference: Hamilton, J.D. (1989). "A new approach to the economic analysis of
@@ -10,7 +10,7 @@
 
 class RegimeSwitchingProcess : public IFundamentalValueProcess {
 public:
-    static constexpr int kRegimes = 3; // low_vol=0, high_vol=1, crash=2
+    static constexpr int kRegimes = 3; // quiet=0, elevated=1, high_vol=2 (zero drift in all)
 
     struct Regime {
         double mu;
@@ -29,16 +29,17 @@ public:
         // derives one per-tick sigma from sigma_annual and scales it by the
         // per-regime multiplier.  Keep the two in sync only through the factory.
         std::array<Regime, kRegimes> regimes = {{
-            {0.0,  1.24e-4},  // 0: quiet    (σ_annual 30% at 1 tick = 1 s)
-            {0.0,  3.10e-4},  // 1: elevated (2.5x)
-            {0.0,  7.44e-4}   // 2: crash    (6x)
+            {0.0,  0.80e-4},  // 0: quiet    (σ_annual 30% at 1 s, after the stationary normalization)
+            {0.0,  2.00e-4},  // 1: elevated (2.5x)
+            {0.0,  4.80e-4}   // 2: high vol (6x)
         }};
         // Row i = transition probabilities from regime i.  Expected duration
-        // is 1/(1-p_ii): 100 / 33 / 6.7 ticks.
+        // is 1/(1-p_ii): 7200 / 1800 / 180 ticks (2 h / 30 min / 3 min at 1 s
+        // per tick).  The factory derives these from FundamentalConfig.
         std::array<std::array<double, kRegimes>, kRegimes> trans = {{
-            {0.990, 0.007, 0.003},
-            {0.020, 0.970, 0.010},
-            {0.050, 0.100, 0.850}
+            {1.0 - 1.0/7200.0, 0.8/7200.0, 0.2/7200.0},
+            {0.8/1800.0, 1.0 - 1.0/1800.0, 0.2/1800.0},
+            {0.3/180.0,  0.7/180.0,  1.0 - 1.0/180.0}
         }};
         int  initial_regime       = 0;
         // Emergence test flag: Gaussian innovations prove fat tails come from microstructure.

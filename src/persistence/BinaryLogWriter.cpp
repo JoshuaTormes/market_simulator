@@ -1,4 +1,5 @@
 #include "BinaryLogWriter.h"
+#include "RecordBuild.h"
 #include <cstring>
 #include <stdexcept>
 #include <unistd.h>  // fsync, fileno
@@ -41,40 +42,13 @@ void BinaryLogWriter::write_record(EventTag tag, const void* payload, size_t sz)
 }
 
 void BinaryLogWriter::write_trade(const Trade& t) {
-    TradeRecord r{};
-    r.price       = t.price;
-    r.qty         = t.qty;
-    r.maker_id    = t.maker_id;
-    r.taker_id    = t.taker_id;
-    r.taker_side  = (t.taker_side == Side::Buy) ? 0 : 1;
-    r.maker_agent = t.maker_agent;
-    r.taker_agent = t.taker_agent;
-    r.tick        = t.tick;
-    r.seq_no      = t.seq_no;
-    r.fee_maker   = t.fee_maker;
-    r.fee_taker   = t.fee_taker;
-
+    const auto r = to_record(t);
     std::lock_guard<std::mutex> lk(mu_);
     write_record(EventTag::Trade, &r, sizeof(r));
 }
 
 void BinaryLogWriter::write_snapshot(const MarketSnapshot& s) {
-    MarketSnapshotRecord r{};
-    r.tick                  = s.tick;
-    r.mid_price             = s.mid_price;
-    r.spread                = s.spread;
-    r.last_trade_price      = s.last_trade_price;
-    r.realized_vol_s        = s.realized_vol[0];
-    r.realized_vol_m        = s.realized_vol[1];
-    r.realized_vol_l        = s.realized_vol[2];
-    r.vwap_s                = s.vwap[0];
-    r.ofi_tick              = s.ofi_tick;
-    r.trade_imbalance       = s.trade_imbalance;
-    r.momentum              = s.momentum;
-    r.book_imbalance_l1     = s.book_imbalance[0];
-    r.fundamental_value     = s.fundamental_value;
-    r.regime                = static_cast<int8_t>(s.regime);
-
+    const auto r = to_record(s);
     std::lock_guard<std::mutex> lk(mu_);
     write_record(EventTag::MarketSnapshot, &r, sizeof(r));
 }
@@ -114,6 +88,12 @@ void BinaryLogWriter::write_ledger(Tick tick, AgentId agent, Side side,
 
     std::lock_guard<std::mutex> lk(mu_);
     write_record(EventTag::LedgerEvent, &r, sizeof(r));
+}
+
+void BinaryLogWriter::write_metaorder(const MetaorderEvent& m) {
+    const auto r = to_record(m);
+    std::lock_guard<std::mutex> lk(mu_);
+    write_record(EventTag::Metaorder, &r, sizeof(r));
 }
 
 void BinaryLogWriter::flush(bool do_fsync) {

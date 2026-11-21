@@ -44,4 +44,5 @@ private:
 
     std::map<AgentId, uint64_t> ticks_at_limit_;
     uint64_t                    ticks_run_ = 0;
+    std::vector<size_t>         order_;     // per-tick processing permutation
 };

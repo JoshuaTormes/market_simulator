@@ -67,6 +67,14 @@ MarketSnapshot MarketDataPublisher::publish(Tick now) {
     auto bids_v = book_.top_bids(cfg_.depth_levels);
     auto asks_v = book_.top_asks(cfg_.depth_levels);
 
+    // Touch supplied by non-makers.
+    if (!mm_ids_.empty() && !bids_v.empty() && !asks_v.empty()) {
+        const auto [b, a] = book_.top_qty_where([this](AgentId id) {
+            return std::find(mm_ids_.begin(), mm_ids_.end(), id) == mm_ids_.end(); });
+        const Qty tot = bids_v[0].qty + asks_v[0].qty;
+        if (tot > 0) snap.non_mm_top_frac = static_cast<double>(b + a) / static_cast<double>(tot);
+    }
+
     // micro_price (size-weighted top-1)
     {
         Qty bid_qty = bids_v.empty() ? 0 : bids_v[0].qty;

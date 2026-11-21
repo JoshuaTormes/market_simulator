@@ -80,17 +80,17 @@ TEST_CASE("clearing: fees allocated to correct sides", "[clearing]") {
     Clearing clearing(ledger, TK);
 
     FeeModel fm;
-    fm.taker_fee_per_lot   = 3;
-    fm.maker_rebate_per_lot = 1;
+    fm.taker_fee_bp    = 3.0;    // 3 bp of 10 × 100 ticks = 0.3 tick = 300 fee units
+    fm.maker_rebate_bp = 1.0;
 
-    Price taker_fee  =  fm.taker_fee(10);   // +30
-    Price maker_fee  = -fm.maker_rebate(10); // -10 (rebate credit)
+    Price taker_fee  =  fm.taker_fee(10, 100);    // +300
+    Price maker_fee  = -fm.maker_rebate(10, 100); // -100 (rebate credit)
 
     Trade tr = make_trade(1, 2, Side::Buy, 100, 10, maker_fee, taker_fee);
     clearing.apply(tr);
 
-    CHECK(ledger.fees_net(2, TK) ==  30); // taker paid 30
-    CHECK(ledger.fees_net(1, TK) == -10); // maker received 10 rebate
+    CHECK(ledger.fees_net(2, TK) ==  300); // taker paid 300
+    CHECK(ledger.fees_net(1, TK) == -100); // maker received 100 rebate
 }
 
 // ── Conservation after clearing ───────────────────────────────────────────
@@ -132,4 +132,14 @@ TEST_CASE("clearing: sequential trades accumulate pnl", "[clearing]") {
     clearing.apply(make_trade(1, 99, Side::Buy, 90, 5));
     CHECK(ledger.realized_pnl(1, TK) == 50 + (-50)); // 0 net
     CHECK(ledger.net_qty(1, TK) == 0);
+}
+
+TEST_CASE("fee model: a sub-tick fee on the notional is not rounded away", "[clearing]") {
+    FeeModel fm;
+    fm.taker_fee_bp = 0.1;                       // 0.1 bp of $100 = 0.1 tick per lot
+    CHECK(fm.taker_fee(1, 10000)  == kFeeUnitsPerTick / 10);
+    CHECK(fm.taker_fee(37, 10000) == 37 * kFeeUnitsPerTick / 10);
+    CHECK(fm.taker_fee(10, 20000) == 2 * kFeeUnitsPerTick);   // scales with price
+    CHECK(fm.maker_rebate(10, 10000) == 0);      // no rebate configured
+    CHECK(FeeModel{}.taker_fee(1000, 10000) == 0);
 }

@@ -117,6 +117,7 @@ set(CORE_SRC
     src/agents/MarketMakerAS.cpp
     src/agents/InformedTraderKyle.cpp
     src/agents/NoiseTrader.cpp
+    src/agents/LimitOrderTrader.cpp
     src/agents/MomentumTrader.cpp
     src/agents/MeanReverterOU.cpp
     src/agents/ValueInvestor.cpp
@@ -139,6 +140,8 @@ set(CORE_SRC
     src/analysis/HillEstimator.cpp
     src/analysis/FlashCrashDetector.cpp
     src/analysis/Report.cpp
+    src/analysis/SeriesCollector.cpp
+    src/analysis/StylizedFactsV2.cpp
 )
 
 add_library(sim_core STATIC ${CORE_SRC})

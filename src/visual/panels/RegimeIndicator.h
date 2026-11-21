@@ -6,7 +6,7 @@ class RegimeIndicator {
 public:
     static constexpr int kMaxHistory = 500;
 
-    // regime: -1 = N/A, 0 = low_vol, 1 = high_vol, 2 = crash
+    // regime: -1 = N/A, 0 = quiet, 1 = elevated, 2 = high vol
     void draw(int regime, double fundamental_value, double tick);
 
 private:

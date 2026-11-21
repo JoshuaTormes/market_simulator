@@ -23,6 +23,10 @@ public:
         int    max_recovery_ticks = 30;    // trough-to-recovery window
         double recovery_fraction  = 0.50;  // fraction of drawdown that must recover
         int    sigma_window       = 30;    // rolling window for σ estimation
+        // Absolute floor on the drop.  A σ-only rule fires on ordinary noise
+        // when returns are heavy-tailed at the tick scale; a real flash crash
+        // is a move of at least a percent, whatever the local σ says.
+        double min_drawdown_pct   = 0.0;
     };
 
     // prices and ticks must have the same length.

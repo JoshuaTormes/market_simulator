@@ -117,3 +117,34 @@ TEST_CASE("RiskGate: cancel orders always approved", "[riskgate]") {
     REQUIRE(result.size() == 1);
     CHECK(result[0].approved);
 }
+
+TEST_CASE("RiskGate: loss limit is disabled by default", "[riskgate]") {
+    RiskLimits rl;
+    CHECK(rl.max_drawdown_pct >= 1.0);
+}
+
+TEST_CASE("RiskGate: loss limit blocks added risk but never a reducing order", "[riskgate]") {
+    PositionLedger ledger;
+    RiskGate gate(ledger, "T");
+    RngService rng(42);
+
+    // Long 100 at 10000, marked at 5000: P&L = -500,000 ticks.
+    ledger.seed_pair(/*agent=*/1, kAllocationAccount, "T", /*qty=*/100, /*price=*/10000);
+
+    RiskLimits rl;
+    rl.max_position     = 10000;
+    rl.max_notional     = 1'000'000LL;
+    rl.max_drawdown_pct = 0.10;          // floor = -100,000 ticks
+
+    TestAgent agent(1, rl, rng);
+    auto r = gate.filter({ make_aa(&agent, Side::Buy,  10, 5000),     // adds risk
+                           make_aa(&agent, Side::Sell, 40, 5000),     // reduces
+                           make_aa(&agent, Side::Sell, 100, 5000),    // flattens
+                           make_aa(&agent, Side::Sell, 150, 5000) },  // flips short
+                         5000);
+    REQUIRE(r.size() == 4);
+    CHECK(!r[0].approved);
+    CHECK(r[1].approved);
+    CHECK(r[2].approved);
+    CHECK(!r[3].approved);
+}

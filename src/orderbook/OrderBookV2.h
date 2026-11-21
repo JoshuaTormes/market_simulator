@@ -73,6 +73,10 @@ public:
     std::vector<DepthLevel> top_bids(int n) const;
     std::vector<DepthLevel> top_asks(int n) const;
 
+    // Resting quantity at the best bid and at the best ask owned by agents
+    // for which `owned` holds: {bid_qty, ask_qty}.
+    std::pair<Qty, Qty> top_qty_where(const std::function<bool(AgentId)>& owned) const;
+
     Qty total_bid_depth() const;
     Qty total_ask_depth() const;
 

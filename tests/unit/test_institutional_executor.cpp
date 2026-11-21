@@ -130,3 +130,56 @@ TEST_CASE("InstitutionalExecutor: same seed → same order sequence",
         }
     }
 }
+
+// Schema v4: each finished parent is published as a MetaorderEvent, closed one
+// call after its last child so that child's fill is in own_inventory.  The
+// bookkeeping must not touch the RNG: with and without a bus the desk emits
+// exactly the same orders.
+TEST_CASE("InstitutionalExecutor: metaorders are published without moving the RNG",
+          "[institutional]") {
+    InstitutionalExecutor::Params p;
+    p.arrival_lambda = 0.01;
+    p.total_slices   = 10;
+    p.ticks_between  = 3;
+
+    RngService rng_a(11), rng_b(11);
+    EventBus bus;
+    std::vector<MetaorderEvent> got;
+    bus.subscribe<MetaorderEvent>([&](const MetaorderEvent& m) { got.push_back(m); });
+
+    InstitutionalExecutor plain(1, "T", rng_a.for_consumer("ie"), p);
+    InstitutionalExecutor wired(1, "T", rng_b.for_consumer("ie"), p,
+                                RiskLimits{}, LatencyProfile{}, InformationProfile{}, &bus);
+
+    // Every child fills in full; the fill shows up in the next snapshot.
+    double inv = 0.0;
+    Qty submitted_total = 0;
+    for (Tick t = 0; t < 20'000; ++t) {
+        AgentSnapshot s = snap_at(t);
+        s.own_inventory = inv;
+        auto a = plain.on_market_data(s);
+        auto b = wired.on_market_data(s);
+        REQUIRE(a.size() == b.size());
+        for (size_t i = 0; i < a.size(); ++i) {
+            const auto& sa = std::get<SubmitOrder>(a[i]);
+            const auto& sb = std::get<SubmitOrder>(b[i]);
+            REQUIRE(sa.side == sb.side);
+            REQUIRE(sa.qty  == sb.qty);
+            inv += (sb.side == Side::Buy ? 1.0 : -1.0) * static_cast<double>(sb.qty);
+            submitted_total += sb.qty;
+        }
+    }
+
+    REQUIRE(got.size() >= 5);
+    Qty published_total = 0;
+    for (const auto& m : got) {
+        CHECK(m.agent == 1);
+        CHECK(m.tick_end >= m.tick_start);
+        CHECK(m.qty_submitted <= m.qty_requested);
+        CHECK(m.qty_executed  == m.qty_submitted);   // every child filled
+        published_total += m.qty_submitted;
+    }
+    // Only a parent still open at the end of the run is missing.
+    CHECK(published_total <= submitted_total);
+    CHECK(submitted_total - published_total <= p.parent_max);
+}

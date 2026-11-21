@@ -16,6 +16,9 @@
 // is worked at a time; an arrival while busy is ignored, which caps the desk's
 // participation rate without needing a queue.
 #include "AgentBase.h"
+#include "core/IntradayProfile.h"
+#include "core/EventBus.h"
+#include "MetaorderEvent.h"
 #include <random>
 
 class InstitutionalExecutor : public AgentBase {
@@ -23,6 +26,9 @@ public:
     struct Params {
         // Parent arrival process.
         double arrival_lambda = 0.002;  // P(new parent | tick), when idle
+        // Session shape on the parent arrival rate: desks work more at the
+        // open and into the close.  Default is flat.
+        IntradayProfile intraday{};
         Qty    parent_min     = 200;    // Pareto support is truncated to
         Qty    parent_max     = 3000;   // [parent_min, parent_max]
         double parent_alpha   = 1.5;    // Pareto tail exponent for parent size
@@ -42,7 +48,8 @@ public:
 
     InstitutionalExecutor(AgentId id, const std::string& ticker,
                           std::mt19937_64 rng, Params p,
-                          RiskLimits rl = {}, LatencyProfile lp = {}, InformationProfile ip = {});
+                          RiskLimits rl = {}, LatencyProfile lp = {}, InformationProfile ip = {},
+                          EventBus* bus = nullptr);
 
     std::vector<Action> on_market_data(const AgentSnapshot& snap) override;
     const char* type() const override { return "InstitutionalExecutor"; }
@@ -55,7 +62,7 @@ private:
     Qty draw_parent_qty();
 
     Params p_;
-    std::bernoulli_distribution arrival_;
+
     std::uniform_real_distribution<double> u_;
 
     // Current parent being worked; remaining_ == 0 means idle.
@@ -64,4 +71,17 @@ private:
     int    slices_done_ = 0;
     Tick   next_tick_   = 0;
     int    parents_started_ = 0;
+
+    // Metaorder bookkeeping, published on the bus (no RNG involved).  The
+    // record is closed one call after the last child so that child's fill is
+    // already in own_inventory.
+    EventBus* bus_            = nullptr;
+    bool   pending_close_     = false;
+    Tick   parent_start_tick_ = 0;
+    Tick   last_child_tick_   = 0;
+    Qty    parent_requested_  = 0;
+    Qty    parent_submitted_  = 0;
+    double parent_start_inv_  = 0.0;
+
+    void publish_metaorder(double inventory_now);
 };

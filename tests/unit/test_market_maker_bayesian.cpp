@@ -74,6 +74,34 @@ TEST_CASE("MarketMakerAS: signed flow moves the belief", "[mm_bayesian]") {
     CHECK(sell.belief() < b0);
 }
 
+TEST_CASE("MarketMakerAS: impact is concave in the size of the flow", "[mm_bayesian]") {
+    // With impact_q_ref = 50, a 50-lot imbalance moves the belief by
+    // lambda·50 exactly as the linear rule does, and a 200-lot one by only
+    // twice that (sqrt(4) = 2), not four times.
+    RngService rng(42);
+    MarketMakerAS::Params p;
+    p.lambda_kyle               = 0.02;
+    p.belief_decay              = 0.0;
+    p.adverse_sel_ticks_per_lot = 0.0;
+    p.impact_q_ref              = 50.0;
+
+    MarketMakerAS a(1, "T", rng.for_consumer("a"), p);
+    a.on_market_data(make_snap(10000));
+    const double b0 = a.belief();
+    a.on_market_data(make_snap(10000, 2, 50.0));
+    CHECK(a.belief() - b0 == Catch::Approx(1.0).margin(1e-9));
+
+    MarketMakerAS b(2, "T", rng.for_consumer("b"), p);
+    b.on_market_data(make_snap(10000));
+    b.on_market_data(make_snap(10000, 2, 200.0));
+    CHECK(b.belief() - b0 == Catch::Approx(2.0).margin(1e-9));
+
+    MarketMakerAS c(3, "T", rng.for_consumer("c"), p);
+    c.on_market_data(make_snap(10000));
+    c.on_market_data(make_snap(10000, 2, -200.0));
+    CHECK(c.belief() - b0 == Catch::Approx(-2.0).margin(1e-9));
+}
+
 TEST_CASE("MarketMakerAS: belief is pulled toward the executed price", "[mm_bayesian]") {
     RngService rng(42);
     MarketMakerAS::Params p;
@@ -131,4 +159,93 @@ TEST_CASE("MarketMakerAS: belief stays within a band of the observable mid",
 
     CHECK(mm.belief() <= 11000.0);
     CHECK(mm.belief() >= 10000.0);
+}
+
+TEST_CASE("MarketMakerAS: a slow maker prices all the flow since its last requote",
+          "[mm_bayesian]") {
+    RngService rng(42);
+    MarketMakerAS::Params p;
+    p.lambda_kyle               = 0.02;
+    p.belief_decay              = 0.0;
+    p.adverse_sel_ticks_per_lot = 0.0;
+    p.impact_q_ref              = 0.0;   // linear rule: the push is λ·ΣOFI
+    p.requote_period            = 3;
+    p.requote_phase             = 0;
+
+    MarketMakerAS mm(1, "T", rng.for_consumer("mm"), p);
+    mm.on_market_data(make_snap(10000, 0, 0.0));         // first tick: belief = mid
+    const double b0 = mm.belief();
+    CHECK(mm.on_market_data(make_snap(10000, 1, 10.0)).empty());   // off cadence
+    CHECK(mm.on_market_data(make_snap(10000, 2, 10.0)).empty());   // off cadence
+    CHECK(!mm.on_market_data(make_snap(10000, 3, 10.0)).empty());  // requote
+    CHECK(mm.belief() - b0 == Catch::Approx(0.02 * 30.0).margin(1e-9));
+}
+
+TEST_CASE("MarketMakerAS: random cadence keeps the mean period and outlives each gap",
+          "[mm_bayesian]") {
+    RngService rng(42);
+    MarketMakerAS::Params p;
+    p.requote_period = 3;
+    p.random_cadence = true;
+
+    MarketMakerAS mm(1, "T", rng.for_consumer("mm"), p);
+    Tick last = 0, last_ttl = 0;
+    int requotes = 0, min_gap = 1 << 30, max_gap = 0;
+    const Tick n = 30000;
+    for (Tick t = 0; t < n; ++t) {
+        const auto acts = mm.on_market_data(make_snap(10000, t));
+        if (acts.empty()) continue;
+        if (t > 0) {
+            const int gap = static_cast<int>(t - last);
+            min_gap = std::min(min_gap, gap);
+            max_gap = std::max(max_gap, gap);
+            // The previous quote is still resting when its successor arrives.
+            CHECK(last_ttl > t);
+        }
+        last = t;
+        last_ttl = quote(acts, Side::Buy).ttl_expiry;
+        ++requotes;
+    }
+    CHECK(min_gap == 1);
+    CHECK(max_gap == 5);                                  // 2·period − 1
+    CHECK(double(n) / requotes == Catch::Approx(3.0).margin(0.1));
+}
+
+// Belief after one +1% announcement, for a given news-reading mode.
+static double belief_after_news(double noise, bool blind, uint64_t news_seed) {
+    RngService rng(42);
+    EventBus bus;
+    MarketMakerAS::Params p;
+    p.lambda_kyle       = 0.0;
+    p.belief_decay      = 0.0;
+    p.news_signal_noise = noise;
+    p.news_blind        = blind;
+    MarketMakerAS mm(1, "T", rng.for_consumer("mm"), p,
+                     RiskLimits{}, LatencyProfile{}, InformationProfile{}, &bus);
+    mm.set_news_rng(RngService(news_seed).for_consumer("mmn"));
+    mm.on_market_data(make_snap(10000));
+    NewsEvent ev;
+    ev.announce_tick     = 2;
+    ev.ticker            = "T";
+    ev.impact_log_return = 0.01;
+    bus.publish(ev);
+    mm.on_market_data(make_snap(10000, 2));
+    return mm.belief();
+}
+
+TEST_CASE("MarketMakerAS: noisy and blind readings of an announcement", "[mm_bayesian]") {
+    // s = 0 is the exact reading, whatever the noise stream holds.
+    CHECK(belief_after_news(0.0, false, 1) == 10000.0 * std::exp(0.01));
+    CHECK(belief_after_news(0.0, false, 7) == 10000.0 * std::exp(0.01));
+    // Blind: the announcement does not move the belief.
+    CHECK(belief_after_news(0.5, true, 1) == 10000.0);
+    // s > 0: the reading is off, deterministically per stream.
+    const double a = belief_after_news(0.5, false, 1);
+    CHECK(a != Catch::Approx(10000.0 * std::exp(0.01)).epsilon(1e-6));
+    CHECK(a == belief_after_news(0.5, false, 1));
+    // Across streams the reading is centred on the announcement.
+    double sum = 0.0;
+    const int n = 2000;
+    for (int k = 0; k < n; ++k) sum += std::log(belief_after_news(0.5, false, 100 + k) / 10000.0);
+    CHECK(sum / n == Catch::Approx(0.01).margin(0.0005));
 }

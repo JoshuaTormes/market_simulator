@@ -10,7 +10,7 @@ StopLossCluster::StopLossCluster(AgentId id, const std::string& ticker,
                                  RiskLimits rl, LatencyProfile lp, InformationProfile ip)
     : AgentBase(id, ticker, std::move(rng), rl, lp, ip)
     , p_(p)
-    , side_coin_(0.5)
+    , side_coin_(std::clamp(p.long_bias, 0.0, 1.0))
     , qty_dist_(static_cast<long long>(std::max<Qty>(p.qty_min, 1)),
                 static_cast<long long>(std::max<Qty>(p.qty_max, p.qty_min)))
     , side_(p.initial_side)

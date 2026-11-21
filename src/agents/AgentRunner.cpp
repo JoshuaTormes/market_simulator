@@ -1,4 +1,5 @@
 #include "AgentRunner.h"
+#include <algorithm>
 #include <cmath>
 #include <random>
 
@@ -18,7 +19,25 @@ std::vector<AgentAction> AgentRunner::run(const MarketSnapshot& snap,
     ++ticks_run_;
     std::vector<AgentAction> out;
 
-    for (IAgent* agent : agents_) {
+    // Arrival order among orders sent in the same tick is random: two agents
+    // reacting to the same snapshot do not reach the exchange in id order.
+    // Without this the lowest-id maker at a shared price has time priority
+    // forever.  The permutation is a deterministic function of (seed, tick).
+    if (order_.size() != agents_.size()) {
+        order_.resize(agents_.size());
+        for (size_t i = 0; i < order_.size(); ++i) order_[i] = i;
+    }
+    {
+        uint64_t h = seed_ ^ 0x5851f42d4c957f2dULL ^ ((uint64_t)now * 0x6c62272e07bb0142ULL);
+        h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        h = (h ^ (h >> 27)) * 0x94d049bb133111ebULL;
+        h = h ^ (h >> 31);
+        std::mt19937_64 perm_rng(h);
+        std::shuffle(order_.begin(), order_.end(), perm_rng);
+    }
+
+    for (size_t idx : order_) {
+        IAgent* agent = agents_[idx];
         // Per-agent per-tick noise RNG via splitmix64 finalizer (deterministic, no static state).
         uint64_t h = seed_ ^ ((uint64_t)agent->id() * 0x9e3779b97f4a7c15ULL)
                            ^ ((uint64_t)now         * 0x6c62272e07bb0142ULL);

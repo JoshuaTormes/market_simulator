@@ -54,6 +54,7 @@ std::vector<FlashCrashEvent> FlashCrashDetector::detect(
         double drawdown_sigmas = std::abs(cumul_log_ret) / sigma_r;
 
         if (drawdown_sigmas < cfg.sigma_threshold) continue;
+        if (drawdown_pct    < cfg.min_drawdown_pct) continue;
 
         // Check recovery within max_recovery_ticks after trough.
         bool     recovered    = false;

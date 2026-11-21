@@ -9,24 +9,13 @@ PositionRecord& PositionLedger::get_or_create(AgentId agent, const std::string& 
     return positions_[agent][ticker];
 }
 
-// ── Seed ──────────────────────────────────────────────────────────────────
+// ── Booking ───────────────────────────────────────────────────────────────
 
-void PositionLedger::seed(AgentId agent, const std::string& ticker,
-                           Qty qty, Price avg_cost_per_lot) {
-    auto& rec      = get_or_create(agent, ticker);
-    rec.net_qty    += qty;
-    rec.cost_basis += std::abs(qty) * avg_cost_per_lot;
-}
-
-// ── Apply trade side ──────────────────────────────────────────────────────
-
-Price PositionLedger::apply(AgentId agent, Side side, const std::string& ticker,
-                             Qty qty, Price exec_price, Price fee) {
-    assert(qty > 0);
-
-    auto& rec  = get_or_create(agent, ticker);
-    rec.fees_net += fee;
-
+// One side of a transaction against a position record: extend, reduce or
+// flip, realizing P&L on the reduced part.  Shared by apply() and seed(), so
+// that an account seeded on both sides (the allocation account) nets its
+// position instead of adding the two cost bases.
+static Price book(PositionRecord& rec, Side side, Qty qty, Price exec_price) {
     Price realized = 0;
 
     if (side == Side::Buy) {
@@ -75,8 +64,34 @@ Price PositionLedger::apply(AgentId agent, Side side, const std::string& ticker,
             }
         }
     }
-
     return realized;
+}
+
+// ── Seed ──────────────────────────────────────────────────────────────────
+
+void PositionLedger::seed(AgentId agent, const std::string& ticker,
+                           Qty qty, Price avg_cost_per_lot) {
+    if (qty == 0) return;
+    auto& rec = get_or_create(agent, ticker);
+    book(rec, qty > 0 ? Side::Buy : Side::Sell, std::abs(qty), avg_cost_per_lot);
+}
+
+void PositionLedger::seed_pair(AgentId agent, AgentId counterparty, const std::string& ticker,
+                               Qty qty, Price avg_cost_per_lot) {
+    seed(agent, ticker, qty, avg_cost_per_lot);
+    seed(counterparty, ticker, -qty, avg_cost_per_lot);
+}
+
+// ── Apply trade side ──────────────────────────────────────────────────────
+
+Price PositionLedger::apply(AgentId agent, Side side, const std::string& ticker,
+                             Qty qty, Price exec_price, Price fee) {
+    assert(qty > 0);
+
+    auto& rec  = get_or_create(agent, ticker);
+    rec.fees_net += fee;
+    ++rec.fills;
+    return book(rec, side, qty, exec_price);
 }
 
 // ── Queries ────────────────────────────────────────────────────────────────
@@ -132,4 +147,16 @@ Qty PositionLedger::total_net_qty(const std::string& ticker) const {
             total += it->second.net_qty;
     }
     return total;
+}
+
+ZeroSumCheck PositionLedger::zero_sum(const std::string& ticker, Price mark_price) const {
+    ZeroSumCheck z;
+    for (const auto& [agent, by_ticker] : positions_) {
+        const auto it = by_ticker.find(ticker);
+        if (it == by_ticker.end()) continue;
+        z.net_qty   += it->second.net_qty;
+        z.gross_pnl += it->second.realized_pnl + unrealized_pnl(agent, ticker, mark_price);
+        z.fees      += it->second.fees_net;
+    }
+    return z;
 }

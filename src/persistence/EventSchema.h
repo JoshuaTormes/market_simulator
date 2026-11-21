@@ -11,6 +11,7 @@
 #include "core/Types.h"
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 // ── Tag byte ─────────────────────────────────────────────────────────────────
 enum class EventTag : uint8_t {
@@ -20,11 +21,12 @@ enum class EventTag : uint8_t {
     NewsEvent      = 0x03,
     RegimeChange   = 0x04,
     LedgerEvent    = 0x05,
-    // 0x06..0xFF reserved for future events
+    Metaorder      = 0x06,   // v4: one record per completed institutional parent
+    // 0x07..0xFF reserved for future events
 };
 
 static constexpr uint32_t kFileMagic     = 0x534D4C42u;  // 'SMLB'
-static constexpr uint16_t kSchemaVersion = 3;            // v3: MarketSnapshotRecord gains fundamental_value
+static constexpr uint16_t kSchemaVersion = 4;            // v4: snapshot gains news_cum_log; Metaorder records
 static constexpr uint16_t kMinReadableVersion = 1;       // v1/v2 logs stay readable (fundamental_value = 0)
 
 // ── Packed payload records ────────────────────────────────────────────────────
@@ -79,7 +81,8 @@ struct MarketSnapshotRecordV2 {
 };
 static_assert(sizeof(MarketSnapshotRecordV2) == 104, "MarketSnapshotRecordV2 is frozen");
 
-struct MarketSnapshotRecord {
+// v3 snapshot layout — frozen.  Do not modify.
+struct MarketSnapshotRecordV3 {
     Tick    tick;
     Price   mid_price;
     Price   spread;
@@ -96,7 +99,31 @@ struct MarketSnapshotRecord {
     int8_t  regime;
     uint8_t _pad[7];
 };
-static_assert(sizeof(MarketSnapshotRecord) == 112, "MarketSnapshotRecord size changed");
+static_assert(sizeof(MarketSnapshotRecordV3) == 112, "MarketSnapshotRecordV3 is frozen");
+
+struct MarketSnapshotRecord {
+    Tick    tick;
+    Price   mid_price;
+    Price   spread;
+    Price   last_trade_price;
+    double  realized_vol_s;   // short window
+    double  realized_vol_m;   // medium window
+    double  realized_vol_l;   // long window
+    double  vwap_s;
+    double  ofi_tick;         // per-tick OFI: Σbuy_vol − Σsell_vol (v2: was windowed OFI)
+    double  trade_imbalance;
+    double  momentum;
+    double  book_imbalance_l1;
+    double  fundamental_value; // v3: latent V in tick-units (0.0 in v2 logs)
+    // v4: cumulative log-return of every announcement applied to V so far.
+    // Splits log V into its news component and the diffusion, which is what
+    // lets price discovery be measured on the part makers are not told about.
+    // NaN in logs older than v4 (unknown, not zero).
+    double  news_cum_log;
+    int8_t  regime;
+    uint8_t _pad[7];
+};
+static_assert(sizeof(MarketSnapshotRecord) == 120, "MarketSnapshotRecord size changed");
 
 // Widen a v2 record into the current layout (fundamental_value unknown → 0).
 inline MarketSnapshotRecord upgrade_v2(const MarketSnapshotRecordV2& o) {
@@ -108,6 +135,22 @@ inline MarketSnapshotRecord upgrade_v2(const MarketSnapshotRecordV2& o) {
     r.ofi_tick = o.ofi_tick;             r.trade_imbalance = o.trade_imbalance;
     r.momentum = o.momentum;             r.book_imbalance_l1 = o.book_imbalance_l1;
     r.fundamental_value = 0.0;           r.regime = o.regime;
+    r.news_cum_log = std::numeric_limits<double>::quiet_NaN();
+    return r;
+}
+
+// Widen a v3 record (news_cum_log unknown → NaN).
+inline MarketSnapshotRecord upgrade_v3(const MarketSnapshotRecordV3& o) {
+    MarketSnapshotRecord r{};
+    r.tick = o.tick;                     r.mid_price = o.mid_price;
+    r.spread = o.spread;                 r.last_trade_price = o.last_trade_price;
+    r.realized_vol_s = o.realized_vol_s; r.realized_vol_m = o.realized_vol_m;
+    r.realized_vol_l = o.realized_vol_l; r.vwap_s = o.vwap_s;
+    r.ofi_tick = o.ofi_tick;             r.trade_imbalance = o.trade_imbalance;
+    r.momentum = o.momentum;             r.book_imbalance_l1 = o.book_imbalance_l1;
+    r.fundamental_value = o.fundamental_value;
+    r.news_cum_log = std::numeric_limits<double>::quiet_NaN();
+    r.regime = o.regime;
     return r;
 }
 
@@ -139,17 +182,38 @@ struct LedgerEventRecord {
 };
 static_assert(sizeof(LedgerEventRecord) == 48, "LedgerEventRecord size changed");
 
+// v4: one completed parent order of an institutional desk.  Impact of a
+// metaorder is measured from these against the mid path, so the regression is
+// on an exogenous quantity (the parent size) rather than on the per-tick OFI
+// the makers themselves price from.
+struct MetaorderRecord {
+    Tick    tick_start;      // tick the parent arrived (first child submitted)
+    Tick    tick_end;        // tick the last child was submitted
+    AgentId agent_id;
+    uint8_t side;            // 0=Buy, 1=Sell
+    uint8_t _pad[7];
+    Qty     qty_requested;   // parent size
+    Qty     qty_submitted;   // Σ child sizes sent (residual may be dropped)
+    Qty     qty_executed;    // filled, from the desk's own inventory change
+};
+static_assert(sizeof(MetaorderRecord) == 56, "MetaorderRecord size changed");
+
 #pragma pack(pop)
 
 // ── Helper: payload size by tag ───────────────────────────────────────────────
-inline size_t payload_size(EventTag tag) {
+// Snapshot size depends on the file's schema version; the rest are fixed.
+inline size_t payload_size(EventTag tag, uint16_t version = kSchemaVersion) {
     switch (tag) {
         case EventTag::FileHeader:     return sizeof(FileHeaderRecord);
         case EventTag::Trade:          return sizeof(TradeRecord);
-        case EventTag::MarketSnapshot: return sizeof(MarketSnapshotRecord);
+        case EventTag::MarketSnapshot:
+            if (version < 3)  return sizeof(MarketSnapshotRecordV2);
+            if (version == 3) return sizeof(MarketSnapshotRecordV3);
+            return sizeof(MarketSnapshotRecord);
         case EventTag::NewsEvent:      return sizeof(NewsEventRecord);
         case EventTag::RegimeChange:   return sizeof(RegimeChangeRecord);
         case EventTag::LedgerEvent:    return sizeof(LedgerEventRecord);
+        case EventTag::Metaorder:      return version >= 4 ? sizeof(MetaorderRecord) : 0;
         default:                       return 0;
     }
 }
