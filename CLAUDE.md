@@ -14,6 +14,10 @@ ctest --test-dir build          # 31/31 testes
 
 Alvos: `simulador` (UI), `sim_headless`, `sim_calibrate`, `analysis_csv_export`.
 Sem SFML/ImGui: `cmake -S . -B build_noui -DSIM_BUILD_UI=OFF`.
+A UI (`simulador`) só linka com o clang da Apple, porque o `sfml@2` do Homebrew usa libc++:
+`cmake -S . -B build_ui -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_C_COMPILER=/usr/bin/clang`
+e `./build_ui/simulador`. A mesma seed dá outra trajetória no clang (as distribuições da libc++ e a
+libm diferem), então os números de referência valem só para o build g++ em `build/`.
 
 ## CLI
 
