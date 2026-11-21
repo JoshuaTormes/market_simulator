@@ -1,6 +1,8 @@
 #pragma once
-// Trend-following via dual moving average crossover + ATR-based stop loss.
-// Strategy follows Jegadeesh & Titman (1993) cross-sectional momentum.
+// Intraday trend follower: dual moving average crossover + ATR-based stop.
+// The windows are tens of ticks (seconds), so this is chartist trend
+// following.  It is not the cross-sectional momentum of Jegadeesh & Titman
+// (1993), which ranks stocks on 3-12 month returns.
 #include "AgentBase.h"
 #include "core/RollingWindow.h"
 #include <deque>
@@ -28,8 +30,6 @@ private:
     RollingWindow<double> slow_ma_;
     RollingWindow<double> atr_win_;
 
-    int  position_  = 0;  // +1 long, -1 short, 0 flat
-    Price entry_px_ = 0;
     double prev_fast_ = 0.0;
     double prev_slow_ = 0.0;
     bool  warm_       = false;

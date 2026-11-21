@@ -23,6 +23,10 @@ public:
         int    cooldown_ticks = 500;       // ticks flat before a new position
         Qty    qty_min        = 10;        // re-entry size is uniform in
         Qty    qty_max        = 75;        // [qty_min, qty_max]
+        // Probability that a re-entry is long.  Equity investors are
+        // structurally long, so a fall trips more stops than a rise of the
+        // same size.  A stop asymmetry, not the leverage effect (Black 1976).
+        double long_bias      = 0.5;
     };
 
     StopLossCluster(AgentId id, const std::string& ticker,

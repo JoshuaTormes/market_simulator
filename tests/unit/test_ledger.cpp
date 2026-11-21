@@ -165,3 +165,54 @@ TEST_CASE("multiple tickers are independent", "[ledger]") {
     CHECK(ledger.avg_cost(1, "AAPL") == 150);
     CHECK(ledger.avg_cost(1, "MSFT") == 300);
 }
+
+// ── Zero-sum accounting ────────────────────────────────────────────────────
+
+TEST_CASE("seed_pair: initial position has a counterparty", "[ledger][zero-sum]") {
+    PositionLedger ledger;
+    ledger.seed_pair(1, kAllocationAccount, TK, 300, 10000);
+    ledger.seed_pair(2, kAllocationAccount, TK, -120, 10000);
+    CHECK(ledger.net_qty(1, TK) == 300);
+    CHECK(ledger.net_qty(2, TK) == -120);
+    CHECK(ledger.net_qty(kAllocationAccount, TK) == -180);
+    CHECK(ledger.total_net_qty(TK) == 0);
+    const auto z = ledger.zero_sum(TK, 10350);
+    CHECK(z.ok());
+}
+
+TEST_CASE("zero_sum: P&L sums to zero and net P&L to minus fees", "[ledger][zero-sum]") {
+    PositionLedger ledger;
+    ledger.seed_pair(1, kAllocationAccount, TK, 50, 10000);
+    // Each trade books both sides at one price; fees differ by side (maker
+    // rebate, taker fee) and leave the system.
+    struct T { AgentId buyer, seller; Qty q; Price px; Price fee_b, fee_s; };
+    const T trades[] = {
+        {2, 1, 30, 10010,  3, -1},   // 1 sells part of its seeded long
+        {3, 2, 17, 10023,  2, -1},   // 2 reduces at a profit
+        {1, 3, 80,  9997,  8, -2},   // 1 flips through flat; 3 goes short
+        {3, 4, 41, 10005, -1,  4},
+        {4, 2,  7, 10031,  1,  0},
+    };
+    Price fees = 0;
+    for (const auto& t : trades) {
+        ledger.apply(t.buyer,  Side::Buy,  TK, t.q, t.px, t.fee_b);
+        ledger.apply(t.seller, Side::Sell, TK, t.q, t.px, t.fee_s);
+        fees += t.fee_b + t.fee_s;
+    }
+    for (Price mark : {Price{9990}, Price{10007}, Price{10044}}) {
+        const auto z = ledger.zero_sum(TK, mark);
+        INFO("mark " << mark);
+        CHECK(z.net_qty == 0);
+        CHECK(z.gross_pnl == 0);
+        CHECK(z.fees == fees);
+        CHECK(z.ok());
+    }
+    CHECK(ledger.get(1, TK)->fills == 2);
+    CHECK(ledger.get(kAllocationAccount, TK)->fills == 0);
+}
+
+TEST_CASE("zero_sum: a one-sided seed is caught", "[ledger][zero-sum]") {
+    PositionLedger ledger;
+    ledger.seed(1, TK, 100, 10000);
+    CHECK_FALSE(ledger.zero_sum(TK, 10000).ok());
+}

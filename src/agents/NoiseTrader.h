@@ -15,12 +15,16 @@
 // flat.  The trader still has no view on price; it only declines to keep
 // doubling a position it never wanted.
 #include "AgentBase.h"
+#include "core/IntradayProfile.h"
 #include <random>
 
 class NoiseTrader : public AgentBase {
 public:
     struct Params {
-        double p_act      = 0.05;  // probability of acting each tick (Bernoulli)
+        double p_act      = 0.05;  // mid-session probability of acting each tick
+        // Session shape applied to p_act: discretionary traders cluster at the
+        // open and the close (Admati & Pfleiderer 1988).  Default is flat.
+        IntradayProfile intraday{};
         double size_mu    = 1.5;   // log-mean of order size (lognormal)
         double size_sigma = 1.5;   // log-std of order size
         Qty    max_size   = 200;
@@ -39,7 +43,7 @@ public:
 
 private:
     Params p_;
-    std::bernoulli_distribution  act_;
+    std::uniform_real_distribution<double> act_u_;
     std::uniform_real_distribution<double> side_u_;
     std::lognormal_distribution<double> size_dist_;
 };

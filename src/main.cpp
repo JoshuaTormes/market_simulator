@@ -36,6 +36,8 @@ int main(int argc, char** argv) {
         if (key == "--duration") cfg.max_ticks        = static_cast<uint64_t>(std::stoul(argv[i+1]));
         if (key == "--ticker")   cfg.ticker           = argv[i+1];
         if (key == "--output")   cfg.log_output_path  = argv[i+1];
+        if (key == "--taker-fee")    cfg.taker_fee_bp    = std::stod(argv[i+1]);   // bp of notional
+        if (key == "--maker-rebate") cfg.maker_rebate_bp = std::stod(argv[i+1]);
     }
 
     // ── Infra ────────────────────────────────────────────────────────────────
@@ -52,7 +54,7 @@ int main(int argc, char** argv) {
     EventBus bus;
 
     // ── Market mechanics ─────────────────────────────────────────────────────
-    MatchingEngine    matching(cfg.ticker, FeeModel{}, STPMode::CancelBoth, &rng);
+    MatchingEngine    matching(cfg.ticker, FeeModel{cfg.taker_fee_bp, cfg.maker_rebate_bp}, STPMode::CancelBoth, &rng);
     PositionLedger    ledger;
     Clearing          clearing(ledger, cfg.ticker);
     // Publisher reads from the matching engine's internal book (the canonical book state).
@@ -63,6 +65,8 @@ int main(int argc, char** argv) {
     publisher.set_initial_mid(static_cast<Price>(cfg.initial_price_ticks));
 
     // ── Fundamental value + news ─────────────────────────────────────────────
+    // Announcements draw from the same variance budget as the diffusion.
+    cfg.fundamental.news_var_per_tick = cfg.news.variance_per_tick(cfg.time);
     auto fundamental_ptr = make_fundamental_process(cfg.fundamental, cfg.time,
                                                     rng.for_consumer("fundamental"));
     IFundamentalValueProcess& fundamental = *fundamental_ptr;
@@ -77,6 +81,8 @@ int main(int argc, char** argv) {
     PoissonNewsProcess news(news_cfg, rng.for_consumer("news"), &bus);
 
     // ── Agents ───────────────────────────────────────────────────────────────
+    // The session shape has to speak the same clock as everything else.
+    cfg.population.intraday.ticks_per_day = cfg.time.ticks_per_day();
     AgentFactory factory(cfg.population, rng, cfg.ticker, &bus, &ledger);
     auto owned_agents = factory.create_all();
 

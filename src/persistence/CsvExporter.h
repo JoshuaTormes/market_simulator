@@ -14,6 +14,7 @@ public:
         uint64_t snapshots;
         uint64_t news_events;
         uint64_t regime_changes;
+        uint64_t metaorders;
         uint64_t total_bytes_in;
     };
 

@@ -45,10 +45,16 @@ std::vector<FilteredAction> RiskGate::filter(
             bool not_ok = (so->price > 0)
                           ? check_notional(rl, so->qty, so->price)
                           : check_notional(rl, so->qty, mark_price);
-            bool dd_ok  = check_drawdown(rl, aid, mark_price);
-
             // Margin call: equity < margin_req_pct × notional → force flat
             Qty net = ledger_.net_qty(aid, ticker_);
+
+            // An order that only brings the position toward zero adds no risk,
+            // so the loss limit never blocks it — otherwise an agent at the
+            // limit is frozen holding its inventory instead of unwinding it.
+            const Qty  projected = net + (so->side == Side::Buy ? so->qty : -so->qty);
+            const bool reducing  = net != 0 && std::abs(projected) < std::abs(net)
+                                && (projected == 0 || (projected > 0) == (net > 0));
+            bool dd_ok  = reducing || check_drawdown(rl, aid, mark_price);
             bool margin_call = false;
             if (rl.margin_req_pct > 0.0 && net != 0 && mark_price > 0) {
                 Price equity = ledger_.realized_pnl(aid, ticker_)

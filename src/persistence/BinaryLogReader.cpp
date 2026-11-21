@@ -38,15 +38,22 @@ std::optional<LogRecord> BinaryLogReader::next() {
     }
 
     auto tag = static_cast<EventTag>(tag_byte);
-    size_t sz = payload_size(tag);
+    size_t sz = payload_size(tag, version_);
     if (sz == 0) { at_eof_ = true; return std::nullopt; }
 
-    // Snapshots grew a field in v3; older files use the frozen v2 layout.
+    // Snapshots grew a field in v3 and again in v4; older files use the frozen
+    // layouts and are widened into the current one.
     if (tag == EventTag::MarketSnapshot && version_ < 3) {
         MarketSnapshotRecordV2 old{};
         if (std::fread(&old, sizeof(old), 1, fp_) != 1) { at_eof_ = true; return std::nullopt; }
         ++records_read_;
         return upgrade_v2(old);
+    }
+    if (tag == EventTag::MarketSnapshot && version_ == 3) {
+        MarketSnapshotRecordV3 old{};
+        if (std::fread(&old, sizeof(old), 1, fp_) != 1) { at_eof_ = true; return std::nullopt; }
+        ++records_read_;
+        return upgrade_v3(old);
     }
 
     switch (tag) {
@@ -77,6 +84,11 @@ std::optional<LogRecord> BinaryLogReader::next() {
         }
         case EventTag::LedgerEvent: {
             LedgerEventRecord r{};
+            if (std::fread(&r, sz, 1, fp_) != 1) { at_eof_ = true; return std::nullopt; }
+            ++records_read_; return r;
+        }
+        case EventTag::Metaorder: {
+            MetaorderRecord r{};
             if (std::fread(&r, sz, 1, fp_) != 1) { at_eof_ = true; return std::nullopt; }
             ++records_read_; return r;
         }

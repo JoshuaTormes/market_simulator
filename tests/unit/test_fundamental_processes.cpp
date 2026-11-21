@@ -200,12 +200,15 @@ TEST_CASE("RegimeSwitching: all regimes eventually visited", "[regime]") {
     RegimeSwitchingProcess::Config cfg;
     RegimeSwitchingProcess proc(cfg, make_rng("rs_regimes"));
 
+    // Regimes now last hours (2 h / 30 min / 3 min), so the chain needs a
+    // few sessions, not a few minutes, to show all three states.
     bool seen[RegimeSwitchingProcess::kRegimes] = {};
-    for (int i = 0; i < 10000; ++i) {
+    const int n = 20 * 23400;
+    for (int i = 0; i < n; ++i) {
         proc.step(static_cast<Tick>(i), 1.0);
         seen[proc.current_regime()] = true;
     }
     for (int r = 0; r < RegimeSwitchingProcess::kRegimes; ++r) {
-        CHECK(seen[r]); // all regimes visited in 10k steps
+        CHECK(seen[r]); // all regimes visited in 20 sessions
     }
 }

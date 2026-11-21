@@ -2,6 +2,7 @@
 #include "core/Types.h"
 #include "orderbook/OrderBookV2.h"
 #include <array>
+#include <limits>
 #include <vector>
 
 // All price fields in integer ticks. Ratios/stats in double.
@@ -51,6 +52,15 @@ struct MarketSnapshot {
     // visible to agents (they read it only via sees_fundamental); logged so
     // price discovery can be measured offline.
     double fundamental_value = 0.0;
+
+    // Σ log-return of the announcements applied to the fundamental so far, set
+    // by SimulationLoop.  Logged only: log V minus this is the diffusion part.
+    double news_cum_log = 0.0;
+
+    // Share of the resting quantity at the best bid + best ask that belongs to
+    // agents other than the market makers.  NaN when one side is empty or the
+    // publisher was not told who the makers are.  Not logged.
+    double non_mm_top_frac = std::numeric_limits<double>::quiet_NaN();
 
     bool is_valid() const { return spread >= 0; }
 };

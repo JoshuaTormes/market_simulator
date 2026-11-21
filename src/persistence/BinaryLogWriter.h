@@ -7,12 +7,14 @@
 #include "orderbook/Trade.h"
 #include "marketdata/MarketSnapshot.h"
 #include "economics/NewsEvent.h"
+#include "agents/MetaorderEvent.h"
+#include "ILogSink.h"
 #include <cstdio>
 #include <mutex>
 #include <string>
 #include <vector>
 
-class BinaryLogWriter {
+class BinaryLogWriter : public ILogSink {
 public:
     // Opens path for writing.  Writes the file header immediately.
     BinaryLogWriter(const std::string& path,
@@ -21,15 +23,16 @@ public:
                     uint64_t publish_interval,
                     const std::string& ticker);
 
-    ~BinaryLogWriter();
+    ~BinaryLogWriter() override;
 
     // Typed writers — each acquires the lock once.
-    void write_trade   (const Trade&          t);
-    void write_snapshot(const MarketSnapshot& s);
-    void write_news    (const NewsEvent&       n);
-    void write_regime_change(Tick tick, int old_regime, int new_regime);
+    void write_trade   (const Trade&          t) override;
+    void write_snapshot(const MarketSnapshot& s) override;
+    void write_news    (const NewsEvent&       n) override;
+    void write_regime_change(Tick tick, int old_regime, int new_regime) override;
     void write_ledger  (Tick tick, AgentId agent, Side side,
                         Price exec_price, Qty qty, Price fee);
+    void write_metaorder(const MetaorderEvent& m) override;
 
     // Flush OS buffer; optional fsync for durability.
     void flush(bool do_fsync = false);

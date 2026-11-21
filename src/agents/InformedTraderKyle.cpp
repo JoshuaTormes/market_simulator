@@ -1,7 +1,10 @@
-// S    = V · exp(ε),  ε ~ N(0, signal_noise_log)
-// gap  = S − mid                                    (price ticks)
-// trade if |gap| > spread/2 + margin_ticks, size = min(cap, lambda_inv·|gap|·pareto)
-// else unwind min(unwind_qty, |q|) toward flat
+// S        = V · exp(ε),  ε ~ N(0, signal_noise_log)
+// gap      = S − mid                                          (price ticks)
+// thr      = spread/2 + margin_ticks + deadband_sigma · signal_noise_log · mid
+// gap_eff  = sign(gap) · max(0, |gap| − thr)
+// q*       = clamp(κ · gap_eff, −q_soft, +q_soft)
+// order    = speed · (q* − q)   (× Pareto multiplier when it grows |q|)
+// send if |order| ≥ min_order, capped at max_order_size, as a market order
 #include "InformedTraderKyle.h"
 #include <algorithm>
 #include <cmath>
@@ -15,58 +18,54 @@ InformedTraderKyle::InformedTraderKyle(AgentId id, const std::string& ticker,
 {}
 
 std::vector<Action> InformedTraderKyle::on_market_data(const AgentSnapshot& snap) {
-    if (!snap.has_fundamental) return {};
+    // Both draws happen every tick, whatever the state, so the RNG stream does
+    // not depend on the path.
+    const double eps = log_noise_(rng_);
+    const double u   = u_(rng_);
 
+    if (!snap.has_fundamental) return {};
     const double mid = static_cast<double>(snap.perceived_mid);
     if (mid <= 0.0) return {};
 
     // Private value: a proportional error on V, so the signal quality does not
     // depend on the price level.
-    const double S   = snap.fundamental_value * std::exp(log_noise_(rng_));
+    const double S   = snap.fundamental_value * std::exp(eps);
     const double gap = S - mid;
 
-    // Crossing the spread costs half of it; a gap smaller than that is not an
-    // opportunity, it is a fee.
+    // Costs of acting on the gap: crossing the spread, a margin, and one sigma
+    // of the trader's own signal noise — a gap inside its own error bar is
+    // noise, and trading noise pays the spread to the makers for nothing.
     const double half_spread = 0.5 * static_cast<double>(std::max<Price>(snap.base.spread, 0));
-    const double threshold   = half_spread + p_.margin_ticks;
+    const double sigma_ticks = p_.signal_noise_log * mid;
+    const double lvl = (p_.price_ref_ticks > 0.0) ? mid / p_.price_ref_ticks : 1.0;
+    const double thr = half_spread + lvl * p_.margin_ticks + p_.deadband_sigma * sigma_ticks;
 
-    const double q = snap.own_inventory;
+    const double excess  = std::max(0.0, std::abs(gap) - thr);
+    const double gap_eff = (gap >= 0.0) ? excess : -excess;
 
-    if (std::abs(gap) <= threshold) {
-        // Nothing to trade on.  Give back inventory so the next signal finds
-        // room under the position limit.
-        if (std::abs(q) < 1.0) return {};
-        const Side side = (q > 0.0) ? Side::Sell : Side::Buy;
-        const Qty  qty  = static_cast<Qty>(
-            std::min(static_cast<double>(p_.unwind_qty), std::abs(q)));
-        if (qty <= 0) return {};
-        return { submit(side, OrderType::Market, 0, qty) };
-    }
-
-    double size = p_.lambda_inv * std::abs(gap);
-    if (p_.pareto_alpha > 1.0) {
-        // Pareto multiplier with unit mean: keeps the Kyle direction and the
-        // average size, adds the heavy tail real informed flow shows.
-        std::uniform_real_distribution<double> u_dist(0.0, 0.9999);
-        const double u = u_dist(rng_);
-        size *= ((p_.pareto_alpha - 1.0) / p_.pareto_alpha)
-              * std::pow(1.0 - u, -1.0 / p_.pareto_alpha);
-    }
-
-    const Side side = (gap > 0.0) ? Side::Buy : Side::Sell;
-
-    // Fade the side that grows the position as it approaches the risk limit.
-    // Without this the trader keeps sending orders the risk gate rejects while
-    // a long-lived gap persists, and spends the rest of the run pinned at the
-    // limit with no capacity left for the next signal.
     const double q_soft = static_cast<double>(rl_.max_position)
                         * std::clamp(p_.q_soft_frac, 0.05, 1.0);
-    const bool   grows = (q == 0.0) || ((gap > 0.0) == (q > 0.0));
-    if (grows && q_soft > 0.0)
-        size *= std::max(0.0, 1.0 - std::abs(q) / q_soft);
+    target_ = std::clamp(p_.target_lots_per_tick * gap_eff / lvl, -q_soft, q_soft);
 
-    if (size < 1.0) return {};
-    const Qty qty = static_cast<Qty>(
-        std::min(static_cast<double>(p_.max_order_size), size));
+    const double q = snap.own_inventory;
+    double order = p_.speed * (target_ - q);
+
+    // Heavy tail on the slices that build a position: real informed flow is
+    // not a constant drip.  The multiplier has unit mean, so κ and speed keep
+    // their meaning; it is not applied when the trader is coming back toward
+    // flat, where overshooting would just churn.
+    const bool grows = std::abs(q + order) > std::abs(q);
+    if (grows && p_.pareto_alpha > 1.0) {
+        order *= ((p_.pareto_alpha - 1.0) / p_.pareto_alpha)
+               * std::pow(1.0 - u, -1.0 / p_.pareto_alpha);
+    }
+
+    const double mag = std::abs(order);
+    if (mag < static_cast<double>(p_.min_order)) return {};
+
+    const Side side = (order > 0.0) ? Side::Buy : Side::Sell;
+    const Qty  qty  = static_cast<Qty>(std::llround(
+        std::min(static_cast<double>(p_.max_order_size), mag)));
+    if (qty <= 0) return {};
     return { submit(side, OrderType::Market, 0, qty) };
 }

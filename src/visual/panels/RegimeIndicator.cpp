@@ -3,7 +3,7 @@
 #include "implot.h"
 #include <algorithm>
 
-static const char* kRegimeNames[] = { "Low Vol", "High Vol", "Crash", "N/A" };
+static const char* kRegimeNames[] = { "Calm", "Elevated Vol", "High Vol", "N/A" };
 static const ImVec4 kRegimeColors[] = {
     ImVec4(0.20f, 0.80f, 0.20f, 1.0f),   // 0: green
     ImVec4(1.00f, 0.60f, 0.00f, 1.0f),   // 1: orange

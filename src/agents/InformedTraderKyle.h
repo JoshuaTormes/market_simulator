@@ -1,37 +1,41 @@
 #pragma once
-// Informed trader with linear price impact: Kyle (1985).
+// Informed trader as a target-position strategy: Kyle (1985) in the form the
+// empirical literature actually finds.
 //
 // The trader sees the latent fundamental through multiplicative noise,
-// S = V·exp(ε), and trades the *gap* between that private value and the
-// quoted mid.  Two properties make it a price-discovery mechanism rather than
-// a one-way accumulator:
+// S = V·exp(ε), and holds a position proportional to the mispricing that
+// survives its own costs: q* = κ · gap_eff, where gap_eff is the part of the
+// gap S − mid that exceeds the half-spread, a margin and one sigma of the
+// trader's own signal noise.  Each tick it moves a fraction of the way from
+// its current position to q* — Kyle's insider spreads trades over time, and a
+// gradual schedule is what gives the price a chance to move before the next
+// slice, so the trader does not pay its own impact.
 //
-//   * it only crosses the spread when the gap is wider than the cost of
-//     crossing it, so the mid is pushed toward V and then left alone;
-//   * once the gap fits inside the spread the position is unwound, which
-//     releases the inventory the earlier trades built up.
-//
-// The previous version compared V to the mid with an additive noise measured
-// in ticks (0.005 of a tick — effectively no noise), ignored the spread, and
-// never unwound, so both informed traders sat pinned at their position limit
-// for 94% of the run and stopped trading altogether.
+// The previous version traded a *flow* proportional to the gap and unwound
+// 50 lots per tick whenever the gap dipped inside the spread.  On a noisy
+// signal that produced a buy/sell churn around the threshold, and the churn
+// paid the spread to the makers on every leg: the informed traders were the
+// biggest losers in the ecology, which no microstructure model allows.
 #include "AgentBase.h"
 
 class InformedTraderKyle : public AgentBase {
 public:
     struct Params {
-        double signal_noise_log = 5e-4; // sigma of the log-noise on the observed V
-        double lambda_inv       = 0.5;  // lots per tick of gap (inverse Kyle lambda)
-        double margin_ticks     = 1.0;  // gap must beat half-spread by this much
-        Qty    max_order_size   = 200;  // cap per aggressive order
-        Qty    unwind_qty       = 50;   // lots returned per tick when the gap is closed
-        double pareto_alpha     = 1.5;
+        double signal_noise_log      = 5e-4; // sigma of the log-noise on the observed V
+        double target_lots_per_tick  = 40.0; // κ: target position per tick of effective gap
+        double speed                 = 0.10; // fraction of (q* − q) traded per tick
+        double deadband_sigma        = 1.0;  // extra threshold in sigmas of the own signal noise
+        double margin_ticks          = 1.0;  // gap must beat the half-spread by this much
+        Qty    max_order_size        = 200;  // cap per aggressive order
+        Qty    min_order             = 5;    // below this the slice is not worth the spread
+        // > 0: margin_ticks and target_lots_per_tick are read at this price and
+        // scaled with mid, so the trader reacts to a relative mispricing.
+        double price_ref_ticks       = 0.0;
+        double pareto_alpha          = 1.5;  // heavy-tailed size multiplier (0 = pure Kyle)
         // Own risk appetite as a fraction of the hard position limit.  The
         // limit belongs to the broker; the trader's own budget is smaller, and
-        // sizing against it is what keeps the trader off the gate — an agent
-        // pinned at the gate has stopped discovering anything, because the
-        // rejected side of its flow carries no information into the book.
-        double q_soft_frac      = 0.6;  // heavy-tailed size multiplier (0 = pure Kyle)
+        // a trader pinned at the gate has stopped discovering anything.
+        double q_soft_frac           = 0.6;
     };
 
     InformedTraderKyle(AgentId id, const std::string& ticker,
@@ -41,7 +45,12 @@ public:
     std::vector<Action> on_market_data(const AgentSnapshot& snap) override;
     const char* type() const override { return "InformedTraderKyle"; }
 
+    // Last target position, in lots — exposed for tests and diagnostics.
+    double target() const { return target_; }
+
 private:
     Params p_;
-    std::normal_distribution<double> log_noise_;
+    double target_ = 0.0;
+    std::normal_distribution<double>       log_noise_;
+    std::uniform_real_distribution<double> u_{0.0, 0.9999};
 };

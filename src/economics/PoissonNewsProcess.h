@@ -15,7 +15,10 @@ public:
         double      lambda            = 0.01;  // avg news events per tick
         double      magnitude_scale   = 0.005; // |impact| scale in log-return units
         int         student_t_df      = 3;     // Student-t degrees of freedom
-        double      duration_ticks    = 20.0;
+        // The simulators (main, sim_headless, sim_calibrate) overwrite every
+        // field from NewsConfig; these defaults only serve direct construction
+        // in tests.  NewsConfig::duration_ticks (5) is the value that runs.
+        double      duration_ticks    = 5.0;
         double      dispersion_sigma  = 0.3;   // agent heterogeneity in impact interpretation
         std::string ticker            = "MAIN";
     };

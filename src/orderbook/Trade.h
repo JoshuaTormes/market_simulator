@@ -11,6 +11,6 @@ struct Trade {
     AgentId taker_agent = 0;
     Tick    tick        = 0;
     SeqNo   seq_no      = 0;
-    Price   fee_maker   = 0;    // negative = rebate
+    Price   fee_maker   = 0;    // fee units (FeeModel.h); negative = rebate
     Price   fee_taker   = 0;
 };

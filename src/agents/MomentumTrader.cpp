@@ -34,16 +34,31 @@ std::vector<Action> MomentumTrader::on_market_data(const AgentSnapshot& snap) {
 
     std::vector<Action> actions;
 
+    // Orders go to a target position measured against the ledger, not against
+    // the internal flag: a market order that meets an empty side of the book
+    // is lost, and counting it as filled let the real inventory random-walk
+    // to the hard limit (≈500 lots per trader over 60 sessions with qty = 10).
+    const auto to_target = [&](int sign) {
+        const double gap = sign * static_cast<double>(p_.qty) - snap.own_inventory;
+        const Qty    q   = static_cast<Qty>(std::llround(std::abs(gap)));
+        if (q > 0) actions.push_back(submit(gap > 0.0 ? Side::Buy : Side::Sell,
+                                            OrderType::Market, 0, q));
+    };
+
+    // Side and entry price come from the ledger too.  The ledger resets the
+    // cost basis when the position crosses zero, so own_avg_cost is the price
+    // of the position actually held; a stop whose exit order is lost fires
+    // again next tick instead of being forgotten by a flag.
+    const int    position = snap.own_inventory > 0.0 ? 1 : (snap.own_inventory < 0.0 ? -1 : 0);
+    const double ep       = snap.own_avg_cost;
+
     // Stop loss check for open position
-    if (position_ != 0 && entry_px_ > 0 && atr > 0.0) {
+    if (position != 0 && ep > 0.0 && atr > 0.0) {
         double stop_dist = p_.atr_mult * atr;
-        double ep = static_cast<double>(entry_px_);
-        bool stop_hit = (position_ > 0 && mid < ep - stop_dist)
-                     || (position_ < 0 && mid > ep + stop_dist);
+        bool stop_hit = (position > 0 && mid < ep - stop_dist)
+                     || (position < 0 && mid > ep + stop_dist);
         if (stop_hit) {
-            Side exit_side = (position_ > 0) ? Side::Sell : Side::Buy;
-            actions.push_back(submit(exit_side, OrderType::Market, 0, p_.qty));
-            position_ = 0;
+            to_target(0);
             prev_fast_ = fast_now;
             prev_slow_ = slow_now;
             return actions;
@@ -61,18 +76,10 @@ std::vector<Action> MomentumTrader::on_market_data(const AgentSnapshot& snap) {
         return {};
     }
 
-    if (is_long_now && !was_long && position_ <= 0) {
-        if (position_ < 0)
-            actions.push_back(submit(Side::Buy, OrderType::Market, 0, p_.qty));  // close short
-        actions.push_back(submit(Side::Buy, OrderType::Market, 0, p_.qty));
-        position_  = 1;
-        entry_px_  = snap.perceived_mid;
-    } else if (!is_long_now && was_long && position_ >= 0) {
-        if (position_ > 0)
-            actions.push_back(submit(Side::Sell, OrderType::Market, 0, p_.qty)); // close long
-        actions.push_back(submit(Side::Sell, OrderType::Market, 0, p_.qty));
-        position_  = -1;
-        entry_px_  = snap.perceived_mid;
+    if (is_long_now && !was_long && position <= 0) {
+        to_target(+1);
+    } else if (!is_long_now && was_long && position >= 0) {
+        to_target(-1);
     }
 
     prev_fast_ = fast_now;

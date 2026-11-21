@@ -15,12 +15,13 @@ TEST_CASE("AgentFactory: correct count of each type", "[factory]") {
     cfg.institutionals.count  = 1;
     cfg.stop_loss.count       = 3;
     cfg.news_reactors.count   = 2;
+    cfg.limit_traders.count  = 4;
 
     RngService rng(42);
     AgentFactory factory(cfg, rng, "T");
     auto agents = factory.create_all();
 
-    int expected_total = 2 + 5 + 1 + 2 + 2 + 1 + 1 + 3 + 2;
+    int expected_total = 2 + 5 + 1 + 2 + 2 + 1 + 1 + 3 + 2 + 4;
     CHECK(static_cast<int>(agents.size()) == expected_total);
 
     std::map<std::string, int> counts;
@@ -36,6 +37,7 @@ TEST_CASE("AgentFactory: correct count of each type", "[factory]") {
     CHECK(counts["InstitutionalExecutor"] == 1);
     CHECK(counts["StopLossCluster"]      == 3);
     CHECK(counts["NewsReactor"]          == 2);
+    CHECK(counts["LimitOrderTrader"]     == 4);
 }
 
 TEST_CASE("AgentFactory: same seed → same agent IDs and types", "[factory][determinism]") {
@@ -74,11 +76,14 @@ TEST_CASE("AgentFactory: agents have unique IDs", "[factory]") {
         CHECK(cnt == 1);
 }
 
-TEST_CASE("AgentFactory: only InformedTraderKyle sees fundamental", "[factory]") {
+// The limit-order traders see V too, but through a private view with an AR(1)
+// error (LimitOrderTrader::Params::view_sigma), far noisier than the informed desks.
+TEST_CASE("AgentFactory: only informed and limit-order traders see fundamental", "[factory]") {
     PopulationConfig cfg;
     cfg.informed_traders.count  = 2;
     cfg.value_investors.count   = 1;
     cfg.market_makers.count     = 1;
+    cfg.limit_traders.count   = 2;
 
     RngService rng(42);
     AgentFactory factory(cfg, rng, "T");
@@ -86,8 +91,8 @@ TEST_CASE("AgentFactory: only InformedTraderKyle sees fundamental", "[factory]")
 
     for (const auto& a : agents) {
         std::string t = a->type();
-        if (t == "InformedTraderKyle") {
-            CHECK(a->info().sees_fundamental);  // only informed traders have fundamental access
+        if (t == "InformedTraderKyle" || t == "LimitOrderTrader") {
+            CHECK(a->info().sees_fundamental);
         } else {
             CHECK_FALSE(a->info().sees_fundamental);  // MM and VI no longer see fundamental
         }

@@ -5,6 +5,8 @@
 #include "core/RollingWindow.h"
 #include <array>
 #include <deque>
+#include <vector>
+#include <algorithm>
 #include <cstdint>
 
 // Produces MarketSnapshot each tick from live OrderBook + trade feed.
@@ -34,9 +36,14 @@ public:
     // Must be called before the first publish() call.
     void set_initial_mid(Price p) { prev_valid_mid_ = p; }
 
+    // Market-maker ids, so the snapshot can report how much of the touch is
+    // supplied by somebody else (MarketSnapshot::non_mm_top_frac).
+    void set_mm_ids(std::vector<AgentId> ids) { mm_ids_ = std::move(ids); }
+
 private:
     const OrderBookV2& book_;
     Config cfg_;
+    std::vector<AgentId> mm_ids_;
 
     // State
     Price last_trade_price_ = 0;

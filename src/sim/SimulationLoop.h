@@ -16,7 +16,7 @@
 #include "marketdata/SnapshotBuffer.h"
 #include "marketdata/TradeTapeBuffer.h"
 #include "marketdata/AgentStateBuffer.h"
-#include "persistence/BinaryLogWriter.h"
+#include "persistence/ILogSink.h"
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -61,7 +61,7 @@ public:
     void set_tick_delay_us(uint64_t us) { tick_delay_us_.store(us, std::memory_order_relaxed); }
 
     // Wire optional UI-facing buffers (call before run()).
-    void set_event_bus(EventBus* bus)                           { event_bus_ = bus; }
+    void set_event_bus(EventBus* bus)                           { event_bus_ = bus; wire_log_bus(); }
     void set_trade_tape(TradeTapeBuffer* buf)                   { trade_tape_ = buf; }
     void set_agent_state_buf(AgentStateBuffer* buf,
                              std::vector<AgentId> ids,
@@ -70,7 +70,7 @@ public:
         agent_ids_       = std::move(ids);
         ticker_          = std::move(ticker);
     }
-    void set_log_writer(BinaryLogWriter* writer) { log_writer_ = writer; }
+    void set_log_writer(ILogSink* writer) { log_writer_ = writer; wire_log_bus(); }
 
     // Thread-safe: queue a news event to be published on the next sim tick.
     void inject_news(const NewsEvent& ev) {
@@ -96,7 +96,15 @@ private:
     EventBus*         event_bus_{nullptr};
     TradeTapeBuffer*  trade_tape_{nullptr};
     AgentStateBuffer* agent_state_buf_{nullptr};
-    BinaryLogWriter*  log_writer_{nullptr};
+    ILogSink*         log_writer_{nullptr};
+    bool              log_bus_wired_{false};
+
+    // Once both the bus and the writer are known, route bus-only events
+    // (metaorder completions) into the log.  Idempotent.
+    void wire_log_bus();
+
+    // Σ log-return of every announcement applied to the fundamental so far.
+    double news_cum_log_{0.0};
     std::vector<AgentId> agent_ids_;
     std::string      ticker_;
 

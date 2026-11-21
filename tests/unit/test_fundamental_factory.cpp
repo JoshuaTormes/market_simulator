@@ -111,8 +111,71 @@ TEST_CASE("FundamentalProcessFactory: RegimeSwitching scales sigma by the regime
     REQUIRE(proc != nullptr);
     CHECK(std::string(proc->name()) == "RegimeSwitching");
     CHECK(proc->current_value() == Catch::Approx(200.0));
-    // Starts in the quiet regime, so current_vol is the base per-tick sigma.
-    CHECK(proc->current_vol() == Catch::Approx(ts.per_tick_vol(0.30)));
+    // Starts in the quiet regime.  The base sigma sits *below* the nominal
+    // per-tick sigma, because the multipliers inflate the unconditional
+    // variance and the factory normalizes that away: with the default sojourn
+    // times pi ~ {0.78, 0.21, 0.01} and E[m^2] ~ 2.4, so base ~ 0.645 sigma.
+    const double base = proc->current_vol();
+    CHECK(base < ts.per_tick_vol(0.30));
+    CHECK(base > 0.5 * ts.per_tick_vol(0.30));
+}
+
+TEST_CASE("FundamentalProcessFactory: RegimeSwitching unconditional vol equals sigma_annual",
+          "[factory][fundamental]") {
+    // Twenty sessions of the regime process must realize an annualized
+    // volatility close to the configured 30%; that is the whole point of the
+    // stationary normalization.  A wide band: with 2-hour quiet regimes the
+    // realized vol over 20 days still carries sampling noise.
+    FundamentalConfig cfg;
+    cfg.type          = FundamentalProcessType::RegimeSwitching;
+    cfg.initial_value = 100.0;
+    cfg.sigma_annual  = 0.30;
+
+    TimeScale ts;
+    auto proc = make_fundamental_process(cfg, ts, make_rng(11));
+    const long n = static_cast<long>(ts.ticks_per_day()) * 20;
+
+    double prev = proc->current_value();
+    double sum2 = 0.0;
+    for (long t = 0; t < n; ++t) {
+        proc->step(t, 1.0);
+        const double v = proc->current_value();
+        const double r = std::log(v / prev);
+        sum2 += r * r;
+        prev = v;
+    }
+    const double ann_vol = std::sqrt(sum2 / n * ts.ticks_per_year());
+    CHECK(ann_vol == Catch::Approx(0.30).epsilon(0.25));
+}
+
+TEST_CASE("FundamentalProcessFactory: regime sojourn times follow the configured durations",
+          "[factory][fundamental]") {
+    FundamentalConfig cfg;
+    cfg.type = FundamentalProcessType::RegimeSwitching;
+    cfg.regime_duration_sec[0] = 600.0;   // short, so the test sees many spells
+    cfg.regime_duration_sec[1] = 300.0;
+    cfg.regime_duration_sec[2] = 60.0;
+
+    TimeScale ts;
+    auto proc = make_fundamental_process(cfg, ts, make_rng(3));
+    const long n = 400'000;
+    int  prev_regime = proc->current_regime_hint();
+    long spell = 0, quiet_spells = 0, quiet_ticks = 0;
+    for (long t = 0; t < n; ++t) {
+        proc->step(t, 1.0);
+        const int r = proc->current_regime_hint();
+        if (prev_regime == 0) ++quiet_ticks;
+        if (r != prev_regime) {
+            if (prev_regime == 0) ++quiet_spells;
+            prev_regime = r;
+            spell = 0;
+        } else {
+            ++spell;
+        }
+    }
+    REQUIRE(quiet_spells > 50);
+    const double mean_quiet = static_cast<double>(quiet_ticks) / quiet_spells;
+    CHECK(mean_quiet == Catch::Approx(600.0).epsilon(0.25));
 }
 
 TEST_CASE("Fundamental processes: apply_shock moves the level multiplicatively",
@@ -161,4 +224,54 @@ TEST_CASE("FundamentalProcessFactory: different processes diverge from same seed
 
     // With the same seed but different process types, values must differ.
     CHECK(rs->current_value() != gbm->current_value());
+}
+
+// ── Variance budget: announcements are paid for out of sigma_annual ────────
+
+TEST_CASE("Factory: news variance is subtracted from the diffusive budget",
+          "[factory][fundamental][news]") {
+    TimeScale ts;
+    FundamentalConfig cfg;
+    cfg.type         = FundamentalProcessType::GBM;
+    cfg.sigma_annual = 0.30;
+
+    auto no_news = make_fundamental_process(cfg, ts, make_rng(5));
+    const double sigma_full = no_news->current_vol();
+
+    NewsConfig news;                       // shipping defaults
+    cfg.news_var_per_tick = news.variance_per_tick(ts);
+    auto with_news = make_fundamental_process(cfg, ts, make_rng(5));
+    const double sigma_diff = with_news->current_vol();
+
+    CHECK(cfg.news_var_per_tick > 0.0);
+    CHECK(sigma_diff < sigma_full);
+    // Diffusion plus announcements reconstitutes the configured total.
+    const double total = sigma_diff * sigma_diff + cfg.news_var_per_tick;
+    CHECK(std::sqrt(total) == Catch::Approx(sigma_full).epsilon(1e-9));
+}
+
+TEST_CASE("Factory: an over-booked news budget still leaves a diffusion",
+          "[factory][fundamental][news]") {
+    TimeScale ts;
+    FundamentalConfig cfg;
+    cfg.type              = FundamentalProcessType::GBM;
+    cfg.sigma_annual      = 0.30;
+    const double full     = ts.per_tick_vol(cfg.sigma_annual);
+    cfg.news_var_per_tick = 10.0 * full * full;   // absurdly over budget
+
+    auto proc = make_fundamental_process(cfg, ts, make_rng(5));
+    CHECK(proc->current_vol() == Catch::Approx(0.5 * full).epsilon(1e-9));
+}
+
+TEST_CASE("NewsConfig: variance per tick matches lambda·scale²·var[t]",
+          "[factory][news]") {
+    TimeScale ts;
+    NewsConfig news;
+    const double expected = news.lambda_per_tick(ts) * news.impact_scale * news.impact_scale
+                          * (news.impact_df / (news.impact_df - 2.0));
+    CHECK(news.variance_per_tick(ts) == Catch::Approx(expected).epsilon(1e-12));
+
+    // Cauchy-like tails have no variance, so there is nothing to budget.
+    news.impact_df = 2.0;
+    CHECK(news.variance_per_tick(ts) == Catch::Approx(0.0).margin(1e-18));
 }

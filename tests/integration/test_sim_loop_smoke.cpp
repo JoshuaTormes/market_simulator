@@ -99,6 +99,12 @@ TEST_CASE("SimulationLoop smoke: 500 ticks, no crash, conservation holds", "[smo
     Qty total = ledger.total_net_qty(TICKER);
     CHECK(total == 0);
 
+    // Zero-sum: every trade has two sides at one price, so gross P&L across
+    // all accounts is exactly zero at any common mark.
+    MarketSnapshot last;
+    REQUIRE(snap_buf.get_latest(last));
+    CHECK(ledger.zero_sum(TICKER, last.mid_price).ok());
+
     // Snapshot buffer has at least one entry
     CHECK(snap_buf.has_snapshot());
 
