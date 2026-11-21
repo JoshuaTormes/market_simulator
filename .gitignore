@@ -1,1 +1,9 @@
-.venv
+.venv/
+build
+.claude/
+specs/
+logs/
+imgui.ini
+*.DS_Store
+.DS_Store
+.cache/

@@ -1,0 +1,129 @@
+#pragma once
+// Orchestrates one full simulation tick in deterministic order.
+// All components run on the sim thread; UI/logging in separate threads.
+#include "core/Types.h"
+#include "core/Logger.h"
+#include "core/EventBus.h"
+#include "economics/IFundamentalValueProcess.h"
+#include "economics/INewsEventProcess.h"
+#include "economics/NewsEvent.h"
+#include "agents/AgentRunner.h"
+#include "risk/RiskGate.h"
+#include "matching/MatchingEngine.h"
+#include "clearing/Clearing.h"
+#include "ledger/PositionLedger.h"
+#include "marketdata/MarketDataPublisher.h"
+#include "marketdata/SnapshotBuffer.h"
+#include "marketdata/TradeTapeBuffer.h"
+#include "marketdata/AgentStateBuffer.h"
+#include "persistence/ILogSink.h"
+#include <atomic>
+#include <mutex>
+#include <string>
+#include <vector>
+
+class SimulationLoop {
+public:
+    struct Config {
+        Tick        max_ticks        = 100'000;   // 0 = unbounded, until stop()
+        double      dt               = 1.0;   // time units per tick
+        int         publish_interval = 1;     // snapshot every N ticks
+        std::string ticker           = "MAIN";
+        double      tick_size        = 0.01;  // dollars per tick — used to convert fundamental→ticks
+    };
+
+    SimulationLoop(
+        Config                     cfg,
+        IFundamentalValueProcess&  fundamental,
+        INewsEventProcess&         news,
+        AgentRunner&               runner,
+        RiskGate&                  risk_gate,
+        MatchingEngine&            engine,
+        Clearing&                  clearing,
+        PositionLedger&            ledger,
+        MarketDataPublisher&       publisher,
+        Logger&                    logger
+    );
+
+    // Run until max_ticks or stop() is called; max_ticks == 0 runs until
+    // stop(). Publishes to snap_buf.
+    void run(SnapshotBuffer& snap_buf);
+
+    void request_stop() { stop_.store(true,   std::memory_order_release); }
+    void pause()        { paused_.store(true,  std::memory_order_release); }
+    void resume()       { paused_.store(false, std::memory_order_release); }
+    bool is_paused()    const { return paused_.load(std::memory_order_acquire); }
+
+    // Execute N more ticks while paused, then re-pause.
+    void step(Tick n = 1) { step_count_.fetch_add(n, std::memory_order_relaxed); }
+
+    // Slow down the sim: sleep this many µs after each tick (0 = full speed).
+    void set_tick_delay_us(uint64_t us) { tick_delay_us_.store(us, std::memory_order_relaxed); }
+
+    // Wire optional UI-facing buffers (call before run()).
+    void set_event_bus(EventBus* bus)                           { event_bus_ = bus; wire_log_bus(); }
+    void set_trade_tape(TradeTapeBuffer* buf)                   { trade_tape_ = buf; }
+    void set_agent_state_buf(AgentStateBuffer* buf,
+                             std::vector<AgentId> ids,
+                             std::string ticker)                {
+        agent_state_buf_ = buf;
+        agent_ids_       = std::move(ids);
+        ticker_          = std::move(ticker);
+    }
+    void set_log_writer(ILogSink* writer) { log_writer_ = writer; wire_log_bus(); }
+
+    // Thread-safe: queue a news event to be published on the next sim tick.
+    void inject_news(const NewsEvent& ev) {
+        std::lock_guard<std::mutex> lk(pending_news_mu_);
+        pending_news_.push_back(ev);
+    }
+
+    Tick current_tick() const { return current_tick_; }
+
+private:
+    Config                     cfg_;
+    IFundamentalValueProcess&  fundamental_;
+    INewsEventProcess&         news_;
+    AgentRunner&               runner_;
+    RiskGate&                  risk_gate_;
+    MatchingEngine&            engine_;
+    Clearing&                  clearing_;
+    PositionLedger&            ledger_;
+    MarketDataPublisher&       publisher_;
+    Logger&                    logger_;
+
+    // Optional UI-facing buffers (nullptr = disabled)
+    EventBus*         event_bus_{nullptr};
+    TradeTapeBuffer*  trade_tape_{nullptr};
+    AgentStateBuffer* agent_state_buf_{nullptr};
+    ILogSink*         log_writer_{nullptr};
+    bool              log_bus_wired_{false};
+
+    // Once both the bus and the writer are known, route bus-only events
+    // (metaorder completions) into the log.  Idempotent.
+    void wire_log_bus();
+
+    // Σ log-return of every announcement applied to the fundamental so far.
+    double news_cum_log_{0.0};
+    std::vector<AgentId> agent_ids_;
+    std::string      ticker_;
+
+    // Runtime controls
+    std::atomic<bool>     stop_{false};
+    std::atomic<bool>     paused_{false};
+    std::atomic<Tick>     step_count_{0};
+    std::atomic<uint64_t> tick_delay_us_{0};
+
+    // Pending UI-injected news (mutex-protected, flushed each tick)
+    std::mutex             pending_news_mu_;
+    std::vector<NewsEvent> pending_news_;
+
+    Tick              current_tick_{0};
+    OrderId           next_order_id_{1};
+    MarketSnapshot    prev_snap_{};
+
+    void tick_once(Tick now, SnapshotBuffer& snap_buf);
+    void submit_filtered(const std::vector<FilteredAction>& fas, Tick now);
+    void flush_pending_news();
+    void update_agent_state_buf(const MarketSnapshot& snap);
+};
